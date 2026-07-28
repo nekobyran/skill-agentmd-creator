@@ -1,0 +1,46 @@
+# Dependencies and generated frontend output
+/node_modules/
+/dist/
+
+# Local build and test output
+/.tmp/
+/release/
+/log/
+/output/
+/backup/
+/=/
+/src-tauri/target/
+/src-tauri/gen/
+/src/**/bin/
+/src/**/obj/
+
+# Browser automation state and local visual evidence
+**/.playwright-cli/
+**/.playwright-mcp/
+/preview-modal-verification.png
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+auth.json
+credentials*.json
+
+# Editor and operating-system state
+**/.idea/
+**/.vscode/
+*.user
+*.suo
+*.swp
+Thumbs.db
+Desktop.ini
+
+# Logs and transient files
+*.log
+*.tmp
+*.bak
+

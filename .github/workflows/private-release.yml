@@ -1,0 +1,164 @@
+name: Publish SkillCreator release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v1.0.0
+        required: true
+        default: v1.0.0
+        type: string
+      replace_existing:
+        description: Replace an existing prerelease
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: skillcreator-release-${{ github.ref_name }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve and validate release tag
+        id: release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = if ('${{ github.event_name }}' -eq 'push') {
+            '${{ github.ref_name }}'
+          } else {
+            '${{ inputs.tag }}'
+          }
+          if ($tag -notmatch '^v(?<version>\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$') {
+            throw "Invalid SkillCreator release tag: $tag"
+          }
+          $package = Get-Content -LiteralPath package.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ([string]$package.version -cne $Matches.version) {
+            throw "Tag version $($Matches.version) does not match package.json $($package.version)."
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$($Matches.version)" >> $env:GITHUB_OUTPUT
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install locked frontend dependencies
+        run: npm ci
+
+      - name: Build Windows x64 NSIS bundle
+        run: npm run tauri -- build --target x86_64-pc-windows-msvc
+
+      - name: Normalize release assets and checksums
+        id: assets
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $target = Join-Path 'src-tauri/target/x86_64-pc-windows-msvc/release' ''
+          $portableSource = Join-Path $target 'skill-agentmd-creator.exe'
+          $setupSource = Get-ChildItem -LiteralPath (Join-Path $target 'bundle/nsis') -Filter '*.exe' -File | Select-Object -First 1
+          if (-not (Test-Path -LiteralPath $portableSource -PathType Leaf)) {
+            throw "Portable executable not found: $portableSource"
+          }
+          if (-not $setupSource) {
+            throw 'NSIS installer was not produced.'
+          }
+
+          $releaseRoot = Join-Path 'release/github_release' $env:TAG
+          New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
+          $setupName = "SkillCreator-v$env:VERSION-Windows-x64-Setup.exe"
+          $portableName = "SkillCreator-v$env:VERSION-Windows-x64-Portable.exe"
+          $setupPath = Join-Path $releaseRoot $setupName
+          $portablePath = Join-Path $releaseRoot $portableName
+          Copy-Item -LiteralPath $setupSource.FullName -Destination $setupPath -Force
+          Copy-Item -LiteralPath $portableSource -Destination $portablePath -Force
+
+          $setupHash = (Get-FileHash -LiteralPath $setupPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $portableHash = (Get-FileHash -LiteralPath $portablePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          @(
+            "$setupHash  $setupName"
+            "$portableHash  $portableName"
+          ) | Set-Content -LiteralPath (Join-Path $releaseRoot 'SHA256SUMS.txt') -Encoding ascii
+
+          "root=$releaseRoot" >> $env:GITHUB_OUTPUT
+          "setup=$setupPath" >> $env:GITHUB_OUTPUT
+          "portable=$portablePath" >> $env:GITHUB_OUTPUT
+          "checksums=$(Join-Path $releaseRoot 'SHA256SUMS.txt')" >> $env:GITHUB_OUTPUT
+          "setup_sha256=$setupHash" >> $env:GITHUB_OUTPUT
+
+      - name: Verify repository visibility and publish prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          SETUP: ${{ steps.assets.outputs.setup }}
+          PORTABLE: ${{ steps.assets.outputs.portable }}
+          CHECKSUMS: ${{ steps.assets.outputs.checksums }}
+          REPLACE_EXISTING: ${{ inputs.replace_existing }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $visibility = gh repo view $env:GITHUB_REPOSITORY --json visibility --jq '.visibility'
+          if ($visibility.Trim() -ne 'PUBLIC') {
+            throw 'Refusing to publish because the repository is not public.'
+          }
+
+          $exists = $true
+          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) { $exists = $false }
+          if ($exists) {
+            if ($env:REPLACE_EXISTING -ne 'true') {
+              throw "Release $env:TAG already exists. Enable replace_existing only for an intentional replacement."
+            }
+            gh release upload $env:TAG $env:SETUP $env:PORTABLE $env:CHECKSUMS --repo $env:GITHUB_REPOSITORY --clobber
+            gh release edit $env:TAG --repo $env:GITHUB_REPOSITORY --title "SkillCreator $env:TAG" --notes-file RELEASE_NOTES.md --prerelease --latest=false
+          } else {
+            gh release create $env:TAG $env:SETUP $env:PORTABLE $env:CHECKSUMS --repo $env:GITHUB_REPOSITORY --title "SkillCreator $env:TAG" --notes-file RELEASE_NOTES.md --prerelease --latest=false --target $env:GITHUB_SHA
+          }
+
+      - name: Verify release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json isDraft,isPrerelease,url,assets | ConvertFrom-Json
+          if ($release.isDraft -or -not $release.isPrerelease) {
+            throw 'SkillCreator release is not a visible prerelease.'
+          }
+          $names = @($release.assets | ForEach-Object { $_.name })
+          if ('SHA256SUMS.txt' -notin $names -or $names.Count -ne 3) {
+            throw "Unexpected release assets: $($names -join ', ')"
+          }
+          Write-Output "release=$($release.url)"
+
+      - name: Upload build evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: skillcreator-${{ steps.release.outputs.tag }}-windows-x64
+          path: ${{ steps.assets.outputs.root }}
+          if-no-files-found: error
+          retention-days: 14

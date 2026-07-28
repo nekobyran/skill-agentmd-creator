@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "project": "SkillCreator",
+  "version": "1.0.0",
+  "tag": "v1.0.0",
+  "status": "verified",
+  "visibility": "public",
+  "repository": "nekobyran/skill-agentmd-creator",
+  "releaseUrl": "https://github.com/nekobyran/skill-agentmd-creator/releases/tag/v1.0.0",
+  "publishedAt": "2026-07-28T11:33:19.2995927Z",
+  "platform": "Windows",
+  "architecture": "x64",
+  "assets": [
+    {
+      "kind": "installer",
+      "name": "SkillCreator-v1.0.0-Windows-x64-Setup.exe",
+      "sizeBytes": 1171201,
+      "sha256": "1beecade6fcda4d4c68dc9b1771500a0be031d0d8d99495fae796d84d0d7ea51"
+    },
+    {
+      "kind": "portable",
+      "name": "SkillCreator-v1.0.0-Windows-x64-Portable.exe",
+      "sizeBytes": 11291136,
+      "sha256": "9fa6469ba49b3ec0cea85bad121b356cd1559856f387282433b2e3652371ebd2"
+    }
+  ],
+  "checks": [
+    {
+      "label": "Windows x64 release",
+      "result": "passed"
+    },
+    {
+      "label": "SHA-256 manifest",
+      "result": "passed"
+    },
+    {
+      "label": "Public repository",
+      "result": "unknown"
+    }
+  ],
+  "domain": "skillcreator.nkbr.cc"
+}

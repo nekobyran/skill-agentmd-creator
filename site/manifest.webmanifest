@@ -1,0 +1,20 @@
+{
+  "name": "SkillCreator Private Release",
+  "short_name": "SkillCreator",
+  "description": "本地优先的 Codex Skill 创作、无损 Markdown 编辑与 AI 提案审阅工作台。",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#07110e",
+  "theme_color": "#07110e",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

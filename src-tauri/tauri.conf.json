@@ -1,0 +1,46 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Skill Agentmd Creator",
+  "version": "1.0.0",
+  "identifier": "local.skill.agentmd.creator",
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "publisher": "SkillCreator",
+    "homepage": "https://github.com/nekobyran/skill-agentmd-creator",
+    "category": "DeveloperTool",
+    "shortDescription": "Local-first Codex Skill creation studio.",
+    "longDescription": "Create, preserve, review, and package Codex Skills with structured editing, lossless Markdown, domain presets, and explicit AI proposal review.",
+    "useLocalToolsDir": true
+  },
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Skill/agentmd 创建工具",
+        "width": 1220,
+        "height": 760,
+        "resizable": true,
+        "decorations": false,
+        "transparent": false,
+        "shadow": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}

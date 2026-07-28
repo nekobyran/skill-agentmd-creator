@@ -1,0 +1,46 @@
+name: Verify SkillCreator release page
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'command/Verify-SkillCreatorSite.mjs'
+      - '.github/workflows/pages.yml'
+  pull_request:
+    paths:
+      - 'site/**'
+      - 'command/Verify-SkillCreatorSite.mjs'
+      - '.github/workflows/pages.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skillcreator-release-page-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify static release page
+        run: node command/Verify-SkillCreatorSite.mjs --require-release
+
+      - name: Upload verified static page
+        uses: actions/upload-artifact@v4
+        with:
+          name: skillcreator-release-page-${{ github.sha }}
+          path: site
+          if-no-files-found: error
+          retention-days: 14
