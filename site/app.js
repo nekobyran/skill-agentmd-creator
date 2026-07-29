@@ -72,10 +72,10 @@ const renderRelease = (release) => {
   const tag = data.tag || (data.version ? `v${data.version}` : 'Latest');
   const ready = data.status === 'published';
 
-  for (const id of ['primary-release-link', 'release-link']) {
-    const link = byId(id);
-    if (link) link.href = releaseUrl;
-  }
+  const primaryRelease = byId('primary-release-link');
+  if (primaryRelease) primaryRelease.href = installer.url || releaseUrl;
+  const releaseLink = byId('release-link');
+  if (releaseLink) releaseLink.href = releaseUrl;
   const headerRelease = document.querySelector('.header-release');
   if (headerRelease) headerRelease.href = releaseUrl;
 
@@ -90,16 +90,20 @@ const renderRelease = (release) => {
   byId('release-checksum').textContent = installer.sha256 || 'SHA-256 unavailable';
 
   const copyButton = byId('copy-checksum');
-  if (copyButton && /^[a-f0-9]{64}$/iu.test(installer.sha256 || '')) {
-    copyButton.disabled = false;
-    copyButton.dataset.checksum = installer.sha256;
+  if (copyButton) {
+    copyButton.disabled = true;
+    delete copyButton.dataset.checksum;
+    if (/^[a-f0-9]{64}$/iu.test(installer.sha256 || '')) {
+      copyButton.disabled = false;
+      copyButton.dataset.checksum = installer.sha256;
+    }
   }
 
 };
 
 const loadRelease = async () => {
   try {
-    const response = await fetch('./release.json', {
+    const response = await fetch('/api/release', {
       cache: 'no-store',
       headers: { Accept: 'application/json' },
     });
@@ -138,7 +142,9 @@ byId('copy-checksum')?.addEventListener('click', async (event) => {
   }
 });
 
-if ('IntersectionObserver' in window && !reducedMotion) {
+const revealAll = () => revealItems.forEach((item) => item.classList.add('is-visible'));
+
+if ('IntersectionObserver' in window && !reducedMotion && !saveData) {
   const observer = new IntersectionObserver(
     (entries, currentObserver) => {
       for (const entry of entries) {
@@ -152,8 +158,12 @@ if ('IntersectionObserver' in window && !reducedMotion) {
   );
   root.classList.add('reveal-enhanced');
   for (const item of revealItems) observer.observe(item);
+  window.setTimeout(() => {
+    revealAll();
+    observer.disconnect();
+  }, 900);
 } else {
-  for (const item of revealItems) item.classList.add('is-visible');
+  revealAll();
 }
 
 let scrollTicking = false;
@@ -183,7 +193,7 @@ window.addEventListener(
 );
 updateScrollState();
 
-if (finePointerQuery.matches && !reducedMotion) {
+if (finePointerQuery.matches && !reducedMotion && !lowQuality) {
   let pointerTicking = false;
   let pointerX = window.innerWidth / 2;
   let pointerY = window.innerHeight / 2;

@@ -5,9 +5,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use skill_store::{
     codex_model_status_at, create_skill_at, default_app_data_dir, delete_skill_at, design_skill_at,
-    ensure_manifest_at, legacy_root_from_data_dir, list_skills_at, read_skill_at,
-    set_codex_model_at, translate_rule_to_english_at, update_skill_at, DesignSkillRequest,
-    SkillDraft, API_BODY_LIMIT, API_HOST, API_PORT,
+    ensure_manifest_at, import_codex_skills_at, legacy_root_from_data_dir, list_skills_at,
+    read_skill_at, scan_codex_skills_at, set_codex_model_at, translate_rule_to_english_at,
+    update_skill_at, CodexSkillImportRequest, DesignSkillRequest, SkillDraft, API_BODY_LIMIT,
+    API_HOST, API_PORT,
 };
 use std::{
     collections::HashMap,
@@ -217,6 +218,15 @@ fn handle_request(request: HttpRequest, state: &ApiState) -> String {
                 design_skill_at(&state.data_dir, payload).map_err(|message| (400, message))
             })
             .and_then(|result| json_response(200, &result)),
+        ("GET", "/api/codex_skills") => json_result(scan_codex_skills_at(&state.root)),
+        ("POST", "/api/codex_skills/import") => {
+            parse_json_request::<CodexSkillImportRequest>(&request)
+                .and_then(|payload| {
+                    import_codex_skills_at(&state.root, payload)
+                        .map_err(|message| (400, message))
+                })
+                .and_then(|result| json_response(200, &result))
+        }
         ("GET", "/api/skills") => json_result(list_skills_at(&state.root, &state.legacy_root)),
         ("POST", "/api/skills") => parse_skill_request(&request)
             .and_then(|payload| {

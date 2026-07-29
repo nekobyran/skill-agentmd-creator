@@ -19,6 +19,12 @@ import {
   type SkillPreset,
 } from "./features/skill-document";
 import { AdvancedSkillStudio } from "./features/skill-editor";
+import {
+  SkillLibrary,
+  type CodexSkillCatalog,
+  type CodexSkillImportResult,
+} from "./features/skill-library";
+import { RuleGraph, type RuleGraphInput } from "./features/rule-graph";
 
 type SkillSummary = {
   id: string;
@@ -72,7 +78,10 @@ type RuleResult = {
 };
 
 type RuleRoute = {
+  clientId: string;
   route: string;
+  matchMode: RuleMatchMode;
+  conditions: RuleCondition[];
   result: RuleResult;
 };
 
@@ -125,7 +134,7 @@ type CommandTool = {
 };
 
 type ActivePanel = "identity" | "top" | "local" | "command";
-type ActivePage = "editor" | "advanced" | "ai" | "settings";
+type ActivePage = "editor" | "advanced" | "ai" | "library" | "settings";
 type BackendStatus = "connecting" | "connected" | "disconnected";
 type CodexModelStatus = {
   authFileDetected: boolean;
@@ -218,7 +227,10 @@ const emptyCondition = (): RuleCondition => ({
 });
 
 const emptyRoute = (): RuleRoute => ({
+  clientId: createClientId("flow-route"),
   route: "",
+  matchMode: "all",
+  conditions: [emptyCondition()],
   result: {
     kind: "flow",
     requirement: "",
@@ -288,13 +300,16 @@ function App() {
   const [deleteSkillCandidate, setDeleteSkillCandidate] = useState<SkillSummary | null>(null);
   const [newSkillName, setNewSkillName] = useState("");
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewKind, setPreviewKind] = useState<"body" | "sample">("body");
+  const [previewKind, setPreviewKind] = useState<"body" | "sample" | "graph">("body");
   const [activePage, setActivePage] = useState<ActivePage>("editor");
   const [busy, setBusy] = useState(false);
   const [saveStatus, setSaveStatus] = useState("");
   const [toast, setToast] = useState("");
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("connecting");
   const [codexStatus, setCodexStatus] = useState<CodexModelStatus | null>(null);
+  const [codexSkillCatalog, setCodexSkillCatalog] = useState<CodexSkillCatalog | null>(null);
+  const [libraryBusy, setLibraryBusy] = useState(false);
+  const [libraryError, setLibraryError] = useState("");
   const longPressTimerRef = useRef<number | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
   const ruleGridRef = useRef<HTMLDivElement | null>(null);
@@ -335,7 +350,15 @@ function App() {
     function syncPageFromHash() {
       const hash = window.location.hash;
       setActivePage(
-        hash === "#settings" ? "settings" : hash === "#advanced" ? "advanced" : hash === "#ai" ? "ai" : "editor",
+        hash === "#settings"
+          ? "settings"
+          : hash === "#advanced"
+            ? "advanced"
+            : hash === "#ai"
+              ? "ai"
+              : hash === "#library"
+                ? "library"
+                : "editor",
       );
       setPreviewOpen(hash === "#preview");
     }
@@ -358,6 +381,12 @@ function App() {
       void loadCodexStatus();
     }
   }, [activePage, backendStatus]);
+
+  useEffect(() => {
+    if (activePage === "library" && backendStatus === "connected" && !codexSkillCatalog) {
+      void loadCodexSkillCatalog();
+    }
+  }, [activePage, backendStatus, codexSkillCatalog]);
 
   const selectedId = selected?.id ?? "";
   const draft = useMemo(
@@ -388,6 +417,61 @@ function App() {
         })),
       })
     : previewText;
+  const ruleGraphData = useMemo<RuleGraphInput>(
+    () => ({
+      skillName: skillName || selected?.name || "未命名 Skill",
+      topRules: topRules.map((rule, index) => ({
+        id: rule.clientId ?? `top-${index}`,
+        name: rule.name,
+        category: rule.category,
+        ruleType: rule.ruleType ?? "规则",
+        content: topRuleDisplayContent(rule),
+      })),
+      localRules: localRules.map((rule, index) => ({
+        id: rule.clientId ?? `local-${index}`,
+        index,
+        name: rule.name,
+        category: rule.category,
+        editorType: rule.editorType ?? "route",
+        triggers: rule.ruleTriggers.map((trigger, triggerIndex) => ({
+          id: trigger.clientId || `trigger-${triggerIndex}`,
+          label: trigger.displayContent || trigger.content,
+        })),
+        triggerRoutes: rule.ruleTriggerRoutes.map((route, routeIndex) => ({
+          id: route.clientId || `condition-route-${routeIndex}`,
+          triggerId: route.triggerId,
+          matchMode: route.matchMode,
+        })),
+        limits: rule.ruleLimitLinks.map((limit, limitIndex) => ({
+          id: limit.clientId || `limit-${limitIndex}`,
+          label: limit.displayContent || limit.content,
+          triggerId: limit.triggerId,
+          routeId: limit.routeId,
+        })),
+        triggerConditions: rule.triggerConditions.map((condition, conditionIndex) => ({
+          id: `trigger-condition-${conditionIndex}`,
+          label: condition.alias || condition.content,
+        })),
+        limitConditions: rule.limitConditions.map((condition, conditionIndex) => ({
+          id: `limit-condition-${conditionIndex}`,
+          label: condition.alias || condition.content,
+        })),
+        routes: rule.routes.map((route, routeIndex) => ({
+          id: route.clientId || `route-${routeIndex}`,
+          label: route.route,
+          matchMode: route.matchMode,
+          conditions: route.conditions.map((condition, conditionIndex) => ({
+            id: `${route.clientId || routeIndex}-branch-${conditionIndex}`,
+            label: condition.alias || condition.content,
+          })),
+          resultKind: route.result.kind,
+          result: renderResult(route.result),
+          steps: route.result.steps,
+        })),
+      })),
+    }),
+    [skillName, selected?.name, topRules, localRules],
+  );
 
   useEffect(() => {
     if (!categoryDragState) return;
@@ -554,6 +638,51 @@ function App() {
         fastMode: false,
         availableModels: [],
       });
+    }
+  }
+
+  async function loadCodexSkillCatalog() {
+    setLibraryBusy(true);
+    setLibraryError("");
+    try {
+      const catalog = await callBackend<CodexSkillCatalog>("list_codex_skills");
+      setCodexSkillCatalog(catalog);
+    } catch (error) {
+      setLibraryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLibraryBusy(false);
+    }
+  }
+
+  async function importCodexSkills(ids: string[]) {
+    setLibraryBusy(true);
+    setLibraryError("");
+    try {
+      const result = await callBackend<CodexSkillImportResult>("import_codex_skills", { ids });
+      const [catalog] = await Promise.all([
+        callBackend<CodexSkillCatalog>("list_codex_skills"),
+        loadSkills(),
+      ]);
+      setCodexSkillCatalog(catalog);
+      const summary = result.errors.length
+        ? `已导入 ${result.imported.length} 个，${result.errors.length} 个失败`
+        : `已导入 ${result.imported.length} 个，跳过 ${result.skipped.length} 个`;
+      setToast(summary);
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setLibraryError(message);
+      throw error;
+    } finally {
+      setLibraryBusy(false);
+    }
+  }
+
+  function openSkillLibrary() {
+    setActivePage("library");
+    window.location.hash = "#library";
+    if (!codexSkillCatalog && !libraryBusy) {
+      void loadCodexSkillCatalog();
     }
   }
 
@@ -735,7 +864,7 @@ function App() {
     loadEditorFromSkillContent(content);
   }
 
-  function openPreview(kind: "body" | "sample") {
+  function openPreview(kind: "body" | "sample" | "graph") {
     setPreviewKind(kind);
     setPreviewOpen(true);
     if (window.location.hash !== "#preview") {
@@ -1813,6 +1942,71 @@ function App() {
     );
   }
 
+  function updateRouteCondition(
+    ruleIndex: number,
+    routeIndex: number,
+    conditionIndex: number,
+    value: Partial<RuleCondition>,
+  ) {
+    setLocalRulesLatest((current) =>
+      current.map((rule, index) => index !== ruleIndex
+        ? rule
+        : {
+            ...rule,
+            routes: rule.routes.map((route, nextRouteIndex) => nextRouteIndex !== routeIndex
+              ? route
+              : {
+                  ...route,
+                  conditions: route.conditions.map((condition, nextConditionIndex) =>
+                    nextConditionIndex === conditionIndex
+                      ? { ...condition, ...value }
+                      : condition,
+                  ),
+                }),
+          }),
+    );
+  }
+
+  function addRouteCondition(ruleIndex: number, routeIndex: number) {
+    setLocalRulesLatest((current) =>
+      current.map((rule, index) => index !== ruleIndex
+        ? rule
+        : {
+            ...rule,
+            routes: rule.routes.map((route, nextRouteIndex) =>
+              nextRouteIndex === routeIndex
+                ? { ...route, conditions: [...route.conditions, emptyCondition()] }
+                : route,
+            ),
+          }),
+    );
+  }
+
+  function removeRouteCondition(
+    ruleIndex: number,
+    routeIndex: number,
+    conditionIndex: number,
+  ) {
+    setLocalRulesLatest((current) =>
+      current.map((rule, index) => index !== ruleIndex
+        ? rule
+        : {
+            ...rule,
+            routes: rule.routes.map((route, nextRouteIndex) => {
+              if (nextRouteIndex !== routeIndex) return route;
+              return {
+                ...route,
+                conditions: route.conditions.length === 1
+                  ? [emptyCondition()]
+                  : route.conditions.filter((_, nextConditionIndex) =>
+                      nextConditionIndex !== conditionIndex
+                    ),
+              };
+            }),
+          }),
+    );
+  }
+
   function updateFlowStep(
     ruleIndex: number,
     routeIndex: number,
@@ -1903,6 +2097,15 @@ function App() {
                 {backendStatus === "connected" ? "后台已连" : backendStatus === "connecting" ? "后台连接中" : "后台未连"}
               </span>
               <a
+                className={`settings-button library-nav-button ${activePage === "library" ? "is-active" : ""}`}
+                href="#library"
+                aria-label="打开 Codex 技能库"
+                title="Codex 技能库"
+                onClick={openSkillLibrary}
+              >
+                库
+              </a>
+              <a
                 className={`settings-button ai-nav-button ${activePage === "ai" ? "is-active" : ""}`}
                 href="#ai"
                 aria-label="打开 AI Skill 工作台"
@@ -1989,7 +2192,20 @@ function App() {
           </button>
         </aside>
 
-        {activePage === "settings" ? (
+        {activePage === "library" ? (
+          <SkillLibrary
+            catalog={codexSkillCatalog}
+            busy={libraryBusy}
+            error={libraryError}
+            onRefresh={loadCodexSkillCatalog}
+            onImport={importCodexSkills}
+            onOpenImported={(id) => void selectSkill(id)}
+            onClose={() => {
+              setActivePage("editor");
+              window.location.hash = "#editor";
+            }}
+          />
+        ) : activePage === "settings" ? (
           <section className="settings-page">
             <div className="settings-head">
               <div>
@@ -2147,6 +2363,13 @@ function App() {
                   }}
                 >
                   AI 修改
+                </button>
+                <button
+                  className="ghost-button graph-action-button"
+                  type="button"
+                  onClick={() => openPreview("graph")}
+                >
+                  规则关系图
                 </button>
                 <button
                   className="ghost-button"
@@ -2899,6 +3122,81 @@ function App() {
                         </button>
                       </div>
 
+                      <div className="route-condition-head">
+                        <span>分支判断</span>
+                        <select
+                          aria-label={`路线 ${routeIndex + 1} 的判断方式`}
+                          value={route.matchMode}
+                          onChange={(event) =>
+                            updateRoute(selectedLocalRuleIndexForEditor, routeIndex, {
+                              matchMode: event.target.value as RuleMatchMode,
+                            })
+                          }
+                        >
+                          <option value="all">ALL · 全部满足</option>
+                          <option value="any">ANY · 任一满足</option>
+                        </select>
+                        <button
+                          type="button"
+                          aria-label={`为路线 ${routeIndex + 1} 添加分支条件`}
+                          onClick={() =>
+                            addRouteCondition(selectedLocalRuleIndexForEditor, routeIndex)
+                          }
+                        >
+                          +
+                        </button>
+                      </div>
+                      <div className="route-condition-list">
+                        {route.conditions.map((condition, conditionIndex) => (
+                          <div
+                            className="condition-pair"
+                            key={`${route.clientId}-condition-${conditionIndex}`}
+                          >
+                            <input
+                              className="paper-input"
+                              aria-label={`路线 ${routeIndex + 1} 条件 ${conditionIndex + 1} 别名`}
+                              placeholder={`判断 ${conditionIndex + 1}，例如 if4`}
+                              value={condition.alias}
+                              onChange={(event) =>
+                                updateRouteCondition(
+                                  selectedLocalRuleIndexForEditor,
+                                  routeIndex,
+                                  conditionIndex,
+                                  { alias: event.target.value },
+                                )
+                              }
+                            />
+                            <input
+                              className="paper-input"
+                              aria-label={`路线 ${routeIndex + 1} 条件 ${conditionIndex + 1} 实际规则`}
+                              placeholder="实际条件，例如 context includes 4"
+                              value={condition.content}
+                              onChange={(event) =>
+                                updateRouteCondition(
+                                  selectedLocalRuleIndexForEditor,
+                                  routeIndex,
+                                  conditionIndex,
+                                  { content: event.target.value },
+                                )
+                              }
+                            />
+                            <button
+                              type="button"
+                              aria-label={`删除路线 ${routeIndex + 1} 条件 ${conditionIndex + 1}`}
+                              onClick={() =>
+                                removeRouteCondition(
+                                  selectedLocalRuleIndexForEditor,
+                                  routeIndex,
+                                  conditionIndex,
+                                )
+                              }
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+
                       {route.result.kind === "flow" ? (
                         <div className="flow-steps">
                           {route.result.steps.map((step, stepIndex) => (
@@ -3052,14 +3350,20 @@ function App() {
           onClick={closePreview}
         >
           <section
-            aria-label="技能本体预览"
-            className="paper-dialog preview-dialog"
+            aria-label={previewKind === "graph" ? "规则关系图" : "技能本体预览"}
+            className={`paper-dialog preview-dialog${previewKind === "graph" ? " preview-dialog--graph" : ""}`}
             role="dialog"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="preview-dialog-head">
               <div>
-                <strong>{previewKind === "sample" ? "预览样本" : "预览本体"}</strong>
+                <strong>
+                  {previewKind === "graph"
+                    ? "规则关系图"
+                    : previewKind === "sample"
+                      ? "预览样本"
+                      : "预览本体"}
+                </strong>
                 <span>{hasDraftRules ? draft.name : selected?.name || "未命名"}</span>
               </div>
               <button
@@ -3070,7 +3374,19 @@ function App() {
                 关闭
               </button>
             </div>
-            <pre>{(previewKind === "sample" ? samplePreviewText : previewText) || "暂无可预览内容"}</pre>
+            {previewKind === "graph" ? (
+              <RuleGraph
+                data={ruleGraphData}
+                selectedLocalRuleIndex={selectedLocalRuleIndexForEditor}
+                onSelectLocalRule={(index) => {
+                  setActiveLocalCategoryLatest(LOCAL_ALL_CATEGORY);
+                  setSelectedLocalRuleIndex(index);
+                  setActivePanelLatest("local");
+                }}
+              />
+            ) : (
+              <pre>{(previewKind === "sample" ? samplePreviewText : previewText) || "暂无可预览内容"}</pre>
+            )}
           </section>
         </div>
       ) : null}
@@ -3190,7 +3506,10 @@ function buildDraft(
         limitConditions: cleanConditions(rule.limitConditions),
         routes: rule.routes
           .map((route) => ({
+            clientId: route.clientId,
             route: route.route.trim(),
+            matchMode: route.matchMode,
+            conditions: cleanConditions(route.conditions),
             result: {
               kind: route.result.kind,
               requirement: route.result.requirement.trim(),
@@ -3205,7 +3524,11 @@ function buildDraft(
     .filter(
       (rule) => rule.editorType === "rule"
         ? rule.ruleTriggers.length > 0 && rule.ruleLimitLinks.length > 0
-        : (rule.triggerConditions.length > 0 || rule.limitConditions.length > 0) && rule.routes.length > 0,
+        : rule.routes.length > 0 && (
+          rule.triggerConditions.length > 0
+          || rule.limitConditions.length > 0
+          || rule.routes.some((route) => route.conditions.length > 0)
+        ),
     );
   const cleanedCommandTools = commandTools
     .map((tool) => ({
@@ -3256,6 +3579,12 @@ function ensureLocalRuleClientIds(rules: LocalRule[]) {
     return {
       ...rule,
       clientId: rule.clientId || createClientId("local"),
+      routes: (rule.routes?.length ? rule.routes : fallback.routes).map((route) => ({
+        ...route,
+        clientId: route.clientId || createClientId("flow-route"),
+        matchMode: (route.matchMode === "any" ? "any" : "all") as RuleMatchMode,
+        conditions: route.conditions?.length ? route.conditions : [emptyCondition()],
+      })),
       ruleTriggers,
       ruleTriggerRoutes,
       ruleLimitLinks: rule.ruleLimitLinks?.length
@@ -3511,13 +3840,33 @@ function parseLocalRules(content: string): LocalRule[] {
         });
       });
     } else {
-      lines.forEach((line) => {
-        const parsed = parseLocalRuleLine(line);
-        if (parsed) rules.push(parsed);
-      });
+      const parsedLines = lines
+        .map((line) => parseLocalRuleLine(line))
+        .filter((rule): rule is LocalRule => Boolean(rule));
+      const routeRules = parsedLines.filter((rule) => rule.editorType === "route");
+      const sameRouteRuleBase = routeRules.length === parsedLines.length
+        && routeRules.every((rule) => localRuleConditionKey(rule) === localRuleConditionKey(routeRules[0]));
+      if (sameRouteRuleBase && routeRules.length > 0) {
+        rules.push({
+          ...routeRules[0],
+          routes: routeRules.flatMap((rule) => rule.routes),
+        });
+      } else {
+        rules.push(...parsedLines);
+      }
     }
   }
   return rules;
+}
+
+function localRuleConditionKey(rule: LocalRule) {
+  const contents = (conditions: RuleCondition[]) => conditions
+    .map((condition) => condition.content.trim())
+    .filter(Boolean);
+  return JSON.stringify({
+    triggerConditions: contents(rule.triggerConditions),
+    limitConditions: contents(rule.limitConditions),
+  });
 }
 
 function draftFromSourceMarkdown(source: string, fallback: SkillContent | null): SkillDraft {
@@ -3548,15 +3897,26 @@ function parseLocalRuleLine(line: string): LocalRule | null {
     return rule;
   }
 
-  let conditionText = match[1].trim();
+  const rawConditionText = match[1].trim();
   const resultText = match[2].trim();
   let route = "";
-  const routeMarker = "，路线 ";
-  const routeIndex = conditionText.lastIndexOf(routeMarker);
-  if (routeIndex >= 0) {
-    route = conditionText.slice(routeIndex + routeMarker.length).trim();
-    conditionText = conditionText.slice(0, routeIndex).trim();
+  let routeMatchMode: RuleMatchMode = "all";
+  let routeConditionText = "";
+  const baseSegments: string[] = [];
+  for (const segment of rawConditionText.split("，").map((value) => value.trim()).filter(Boolean)) {
+    if (segment.startsWith("路线 ")) {
+      route = segment.slice("路线 ".length).trim();
+      continue;
+    }
+    const branch = segment.match(/^分支条件[（(](ALL|ANY)[）)]\s*(.*)$/i);
+    if (branch) {
+      routeMatchMode = branch[1].toLowerCase() === "any" ? "any" : "all";
+      routeConditionText = branch[2].trim();
+      continue;
+    }
+    baseSegments.push(segment);
   }
+  let conditionText = baseSegments.join("，");
 
   let triggerText = conditionText;
   let limitText = "";
@@ -3577,11 +3937,24 @@ function parseLocalRuleLine(line: string): LocalRule | null {
     limitConditions: parseConditionText(limitText),
     routes: [
       {
+        clientId: createClientId("flow-route"),
         route,
+        matchMode: routeMatchMode,
+        conditions: parseBranchConditionText(routeConditionText, routeMatchMode),
         result: parseRuleResult(resultText),
       },
     ],
   };
+}
+
+function parseBranchConditionText(text: string, matchMode: RuleMatchMode) {
+  const separator = matchMode === "any" ? " 或 " : " 且 ";
+  const conditions = text
+    .split(separator)
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((content) => ({ alias: content, content }));
+  return conditions.length ? conditions : [emptyCondition()];
 }
 
 function parseConditionText(text: string): RuleCondition[] {
@@ -3718,13 +4091,23 @@ function renderStructuredDraft(draft: SkillDraft) {
           group.push(`- 若 ${limits.join(joiner)} 则 ${trigger.content.trim()}`);
         });
       } else {
-        const conditionText = renderConditionText(rule);
         rule.routes.forEach((route) => {
           const result = renderResult(route.result);
-          if (!conditionText || !result) return;
-          group.push(route.route
-            ? `- 如果 ${conditionText}，路线 ${route.route} 那么 ${result}`
-            : `- 如果 ${conditionText} 那么 ${result}`);
+          if (!result) return;
+          const clauses: string[] = [];
+          const conditionText = renderConditionText(rule);
+          if (conditionText) clauses.push(conditionText);
+          if (route.route.trim()) clauses.push(`路线 ${route.route.trim()}`);
+          const routeConditions = route.conditions
+            .map((condition) => condition.content.trim())
+            .filter(Boolean);
+          if (routeConditions.length) {
+            const mode = route.matchMode === "any" ? "ANY" : "ALL";
+            const joiner = route.matchMode === "any" ? " 或 " : " 且 ";
+            clauses.push(`分支条件（${mode}） ${routeConditions.join(joiner)}`);
+          }
+          if (!clauses.length) return;
+          group.push(`- 如果 ${clauses.join("，")} 那么 ${result}`);
         });
       }
       if (group.length) ruleGroups.push(group);
@@ -3966,6 +4349,7 @@ function localApiRequest(command: string, payload?: unknown) {
     prompt?: string;
     currentSource?: string;
     history?: Array<{ role: string; content: string }>;
+    ids?: string[];
   } | undefined;
   switch (command) {
     case "ping_backend":
@@ -3999,6 +4383,14 @@ function localApiRequest(command: string, payload?: unknown) {
       };
     case "list_skills":
       return { method: "GET", path: "/skills" };
+    case "list_codex_skills":
+      return { method: "GET", path: "/codex_skills" };
+    case "import_codex_skills":
+      return {
+        method: "POST",
+        path: "/codex_skills/import",
+        body: { ids: body?.ids ?? [] },
+      };
     case "read_skill":
       return { method: "GET", path: `/skills/${encodeURIComponent(body?.id ?? "")}` };
     case "create_skill":

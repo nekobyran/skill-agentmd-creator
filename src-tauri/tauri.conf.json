@@ -33,7 +33,7 @@
         "width": 1220,
         "height": 760,
         "resizable": true,
-        "decorations": false,
+        "decorations": true,
         "transparent": false,
         "shadow": true,
         "center": true

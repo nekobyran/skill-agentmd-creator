@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::{HashMap, HashSet},
     fs,
     fs::OpenOptions,
     io::{BufRead, BufReader, Write},
@@ -21,6 +22,11 @@ const DESIGN_PROMPT_LIMIT: usize = 20_000;
 const DESIGN_SOURCE_LIMIT: usize = 500_000;
 const DESIGN_HISTORY_LIMIT: usize = 40;
 const DESIGN_HISTORY_TEXT_LIMIT: usize = 120_000;
+const CODEX_SKILL_SCAN_LIMIT: usize = 512;
+const CODEX_SKILL_SCAN_DEPTH: usize = 12;
+const CODEX_SKILL_FILE_LIMIT: usize = 4096;
+const CODEX_SKILL_BYTES_LIMIT: u64 = 64 * 1024 * 1024;
+const IMPORT_SOURCE_FILE_NAME: &str = ".skill-creator-source.json";
 const CODEX_API_BASE: &str = "https://chatgpt.com/backend-api/codex";
 const CODEX_MODELS_URL: &str =
     "https://chatgpt.com/backend-api/codex/models?client_version=0.144.0-alpha.4";
@@ -116,7 +122,13 @@ pub struct RuleCondition {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuleRoute {
+    #[serde(default)]
+    pub client_id: String,
     pub route: String,
+    #[serde(default)]
+    pub match_mode: String,
+    #[serde(default)]
+    pub conditions: Vec<RuleCondition>,
     pub result: RuleResult,
 }
 
@@ -159,6 +171,55 @@ pub struct SkillContent {
     pub description: String,
     pub file_path: String,
     pub content: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexSkillCatalogEntry {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub source: String,
+    pub relative_path: String,
+    pub source_path: String,
+    pub file_count: usize,
+    pub byte_size: u64,
+    pub imported: bool,
+    pub imported_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexSkillCatalog {
+    pub entries: Vec<CodexSkillCatalogEntry>,
+    pub roots: Vec<String>,
+    pub scanned_at: u64,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexSkillImportRequest {
+    #[serde(default)]
+    pub ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexSkillImportResult {
+    pub discovered: usize,
+    pub requested: usize,
+    pub imported: Vec<String>,
+    pub skipped: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportedSkillSource {
+    catalog_id: String,
+    source_path: String,
+    imported_at: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -933,6 +994,429 @@ fn truncate_error_detail(value: &str) -> String {
     } else {
         compact.chars().take(240).collect::<String>() + "..."
     }
+}
+
+pub fn scan_codex_skills_at(workspace_root: &Path) -> Result<CodexSkillCatalog, String> {
+    fs::create_dir_all(workspace_root).map_err(|error| error.to_string())?;
+    let codex_home = codex_home_path().ok_or_else(|| "未找到本机 Codex 目录".to_string())?;
+    let scan_roots = codex_skill_scan_roots(&codex_home);
+    let imported = imported_skill_sources(workspace_root);
+    let mut warnings = Vec::new();
+    let mut skill_files = Vec::new();
+    let mut visible_roots = Vec::new();
+
+    for (source, root) in scan_roots {
+        if !root.is_dir() {
+            continue;
+        }
+        visible_roots.push(root.to_string_lossy().to_string());
+        collect_skill_files(
+            &root,
+            &root,
+            0,
+            &source,
+            &mut skill_files,
+            &mut warnings,
+        )?;
+        if skill_files.len() >= CODEX_SKILL_SCAN_LIMIT {
+            warnings.push(format!(
+                "技能目录超过 {CODEX_SKILL_SCAN_LIMIT} 个，已停止继续扫描"
+            ));
+            break;
+        }
+    }
+
+    let mut seen = HashSet::new();
+    let mut entries = Vec::new();
+    for (source, skill_file) in skill_files {
+        let canonical = match skill_file.canonicalize() {
+            Ok(path) => path,
+            Err(error) => {
+                warnings.push(format!(
+                    "无法解析技能路径 {}：{error}",
+                    skill_file.to_string_lossy()
+                ));
+                continue;
+            }
+        };
+        let source_key = normalized_path_key(&canonical);
+        if !seen.insert(source_key.clone()) {
+            continue;
+        }
+        let content = fs::read_to_string(&canonical).unwrap_or_default();
+        let summary = summary_from_file(&canonical, &content);
+        let skill_dir = canonical.parent().unwrap_or(&canonical);
+        let (file_count, byte_size, limited) = directory_stats(skill_dir)?;
+        if limited {
+            warnings.push(format!(
+                "{} 的配套文件超过导入限制（最多 {CODEX_SKILL_FILE_LIMIT} 个文件、{} MiB）",
+                summary.name,
+                CODEX_SKILL_BYTES_LIMIT / 1024 / 1024
+            ));
+        }
+        let catalog_id = stable_catalog_id(&source_key);
+        let imported_id = imported.get(&catalog_id).cloned();
+        let relative_path = canonical
+            .strip_prefix(&codex_home)
+            .unwrap_or(&canonical)
+            .to_string_lossy()
+            .to_string();
+        entries.push(CodexSkillCatalogEntry {
+            id: catalog_id,
+            name: summary.name,
+            description: summary.description,
+            source,
+            relative_path,
+            source_path: canonical.to_string_lossy().to_string(),
+            file_count,
+            byte_size,
+            imported: imported_id.is_some(),
+            imported_id,
+        });
+    }
+    entries.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+            .then_with(|| left.relative_path.cmp(&right.relative_path))
+    });
+
+    Ok(CodexSkillCatalog {
+        entries,
+        roots: visible_roots,
+        scanned_at: unix_seconds(),
+        warnings,
+    })
+}
+
+pub fn import_codex_skills_at(
+    workspace_root: &Path,
+    request: CodexSkillImportRequest,
+) -> Result<CodexSkillImportResult, String> {
+    let catalog = scan_codex_skills_at(workspace_root)?;
+    let requested_ids: HashSet<String> = request
+        .ids
+        .into_iter()
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .collect();
+    let import_all = requested_ids.is_empty();
+    let selected: Vec<_> = catalog
+        .entries
+        .iter()
+        .filter(|entry| import_all || requested_ids.contains(&entry.id))
+        .collect();
+    let mut result = CodexSkillImportResult {
+        discovered: catalog.entries.len(),
+        requested: if import_all {
+            catalog.entries.len()
+        } else {
+            requested_ids.len()
+        },
+        imported: Vec::new(),
+        skipped: Vec::new(),
+        errors: Vec::new(),
+    };
+
+    if !import_all {
+        let discovered_ids: HashSet<_> = selected.iter().map(|entry| entry.id.as_str()).collect();
+        for missing in requested_ids
+            .iter()
+            .filter(|id| !discovered_ids.contains(id.as_str()))
+        {
+            result
+                .errors
+                .push(format!("未找到 Codex 技能目录 ID：{missing}"));
+        }
+    }
+
+    for entry in selected {
+        if entry.imported {
+            result.skipped.push(entry.name.clone());
+            continue;
+        }
+        match import_codex_skill_entry(workspace_root, entry) {
+            Ok(imported_id) => result.imported.push(imported_id),
+            Err(error) => result.errors.push(format!("{}：{error}", entry.name)),
+        }
+    }
+
+    if !result.imported.is_empty() {
+        if let Err(error) = write_entry_manifest(workspace_root) {
+            result
+                .errors
+                .push(format!("技能已导入，但入口清单更新失败：{error}"));
+        }
+    }
+    Ok(result)
+}
+
+fn codex_home_path() -> Option<PathBuf> {
+    std::env::var("CODEX_HOME")
+        .ok()
+        .map(|value| PathBuf::from(value.trim()))
+        .filter(|path| !path.as_os_str().is_empty())
+        .or_else(|| {
+            std::env::var("USERPROFILE")
+                .ok()
+                .map(|value| PathBuf::from(value.trim()).join(".codex"))
+        })
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|value| PathBuf::from(value.trim()).join(".codex"))
+        })
+}
+
+fn codex_skill_scan_roots(codex_home: &Path) -> Vec<(String, PathBuf)> {
+    vec![
+        ("本地技能".to_string(), codex_home.join("skills")),
+        ("插件技能".to_string(), codex_home.join("plugins").join("cache")),
+    ]
+}
+
+fn collect_skill_files(
+    root: &Path,
+    current: &Path,
+    depth: usize,
+    source: &str,
+    output: &mut Vec<(String, PathBuf)>,
+    warnings: &mut Vec<String>,
+) -> Result<(), String> {
+    if depth > CODEX_SKILL_SCAN_DEPTH || output.len() >= CODEX_SKILL_SCAN_LIMIT {
+        return Ok(());
+    }
+    let entries = match fs::read_dir(current) {
+        Ok(entries) => entries,
+        Err(error) => {
+            warnings.push(format!("无法读取 {}：{error}", current.to_string_lossy()));
+            return Ok(());
+        }
+    };
+    for entry in entries {
+        if output.len() >= CODEX_SKILL_SCAN_LIMIT {
+            break;
+        }
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                warnings.push(format!("读取 Codex 技能目录项失败：{error}"));
+                continue;
+            }
+        };
+        let path = entry.path();
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                warnings.push(format!("无法读取 {} 元数据：{error}", path.to_string_lossy()));
+                continue;
+            }
+        };
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
+            collect_skill_files(root, &path, depth + 1, source, output, warnings)?;
+        } else if metadata.is_file()
+            && path.file_name().and_then(|name| name.to_str()) == Some(SKILL_FILE_NAME)
+        {
+            let source_label = if source == "插件技能" {
+                plugin_source_label(root, &path)
+            } else {
+                source.to_string()
+            };
+            output.push((source_label, path));
+        }
+    }
+    Ok(())
+}
+
+fn plugin_source_label(root: &Path, skill_file: &Path) -> String {
+    let components: Vec<_> = skill_file
+        .strip_prefix(root)
+        .ok()
+        .into_iter()
+        .flat_map(Path::components)
+        .filter_map(|component| match component {
+            Component::Normal(value) => value.to_str(),
+            _ => None,
+        })
+        .take(2)
+        .collect();
+    if components.is_empty() {
+        "插件技能".to_string()
+    } else {
+        format!("插件 · {}", components.join(" / "))
+    }
+}
+
+fn directory_stats(root: &Path) -> Result<(usize, u64, bool), String> {
+    let mut stack = vec![root.to_path_buf()];
+    let mut file_count = 0;
+    let mut byte_size = 0_u64;
+    let mut limited = false;
+    while let Some(current) = stack.pop() {
+        for entry in fs::read_dir(&current).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            if metadata.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if metadata.is_file() {
+                file_count += 1;
+                byte_size = byte_size.saturating_add(metadata.len());
+                if file_count > CODEX_SKILL_FILE_LIMIT || byte_size > CODEX_SKILL_BYTES_LIMIT {
+                    limited = true;
+                    return Ok((file_count, byte_size, limited));
+                }
+            }
+        }
+    }
+    Ok((file_count, byte_size, limited))
+}
+
+fn imported_skill_sources(workspace_root: &Path) -> HashMap<String, String> {
+    let mut imported = HashMap::new();
+    let Ok(entries) = fs::read_dir(workspace_root) else {
+        return imported;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let metadata_path = path.join(IMPORT_SOURCE_FILE_NAME);
+        let Ok(content) = fs::read_to_string(metadata_path) else {
+            continue;
+        };
+        let Ok(source) = serde_json::from_str::<ImportedSkillSource>(&content) else {
+            continue;
+        };
+        let Some(imported_id) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        imported.insert(source.catalog_id, imported_id.to_string());
+    }
+    imported
+}
+
+fn import_codex_skill_entry(
+    workspace_root: &Path,
+    entry: &CodexSkillCatalogEntry,
+) -> Result<String, String> {
+    let source_file = PathBuf::from(&entry.source_path);
+    let source_dir = source_file
+        .parent()
+        .ok_or_else(|| "技能源目录无效".to_string())?
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let (_, _, limited) = directory_stats(&source_dir)?;
+    if limited {
+        return Err(format!(
+            "配套文件超过安全限制（最多 {CODEX_SKILL_FILE_LIMIT} 个文件、{} MiB）",
+            CODEX_SKILL_BYTES_LIMIT / 1024 / 1024
+        ));
+    }
+
+    let safe_name = make_safe_file_name(&entry.name);
+    let base_name = format!(
+        "codex-{}-{}",
+        if safe_name.is_empty() { "skill" } else { &safe_name },
+        &entry.id[..entry.id.len().min(10)]
+    );
+    let target_name = if workspace_root.join(&base_name).exists() {
+        resolve_unique_name(workspace_root, &base_name)
+    } else {
+        base_name
+    };
+    let target = workspace_root.join(&target_name);
+    let temporary = workspace_root.join(format!(
+        ".import-{}-{}",
+        target_name,
+        unix_seconds()
+    ));
+    if temporary.exists() {
+        fs::remove_dir_all(&temporary).map_err(|error| error.to_string())?;
+    }
+    fs::create_dir_all(&temporary).map_err(|error| error.to_string())?;
+
+    let import_result = (|| {
+        copy_skill_directory(&source_dir, &temporary)?;
+        let metadata = ImportedSkillSource {
+            catalog_id: entry.id.clone(),
+            source_path: entry.source_path.clone(),
+            imported_at: unix_seconds(),
+        };
+        let metadata_json =
+            serde_json::to_string_pretty(&metadata).map_err(|error| error.to_string())?;
+        fs::write(
+            temporary.join(IMPORT_SOURCE_FILE_NAME),
+            format!("{metadata_json}\n"),
+        )
+        .map_err(|error| error.to_string())?;
+        fs::rename(&temporary, &target).map_err(|error| error.to_string())
+    })();
+    if let Err(error) = import_result {
+        let _ = fs::remove_dir_all(&temporary);
+        return Err(error);
+    }
+    Ok(target_name)
+}
+
+fn copy_skill_directory(source: &Path, target: &Path) -> Result<(), String> {
+    let mut stack = vec![(source.to_path_buf(), target.to_path_buf())];
+    let mut file_count = 0;
+    let mut byte_size = 0_u64;
+    while let Some((source_dir, target_dir)) = stack.pop() {
+        fs::create_dir_all(&target_dir).map_err(|error| error.to_string())?;
+        for entry in fs::read_dir(&source_dir).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let source_path = entry.path();
+            let metadata =
+                fs::symlink_metadata(&source_path).map_err(|error| error.to_string())?;
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            let target_path = target_dir.join(entry.file_name());
+            if metadata.is_dir() {
+                stack.push((source_path, target_path));
+                continue;
+            }
+            if !metadata.is_file() {
+                continue;
+            }
+            file_count += 1;
+            byte_size = byte_size.saturating_add(metadata.len());
+            if file_count > CODEX_SKILL_FILE_LIMIT || byte_size > CODEX_SKILL_BYTES_LIMIT {
+                return Err("技能目录在复制过程中超过安全限制".to_string());
+            }
+            fs::copy(&source_path, &target_path).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn normalized_path_key(path: &Path) -> String {
+    let value = path.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) {
+        value.to_ascii_lowercase()
+    } else {
+        value
+    }
+}
+
+fn stable_catalog_id(value: &str) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
 
 pub fn list_skills_at(root: &Path, legacy_root: &Path) -> Result<Vec<SkillSummary>, String> {
@@ -1792,25 +2276,43 @@ fn render_rules(rules: &[SkillRule]) -> Vec<String> {
             }
             continue;
         }
-        let condition_text = render_condition_text(rule);
-        if condition_text.is_empty() {
-            continue;
-        }
-
         for route in &rule.routes {
+            let _client_id = route.client_id.trim();
             let result = render_result(&route.result);
             if result.is_empty() {
                 continue;
             }
 
+            let mut clauses = Vec::new();
+            let condition_text = render_condition_text(rule);
+            if !condition_text.is_empty() {
+                clauses.push(condition_text);
+            }
             let route_name = route.route.trim();
-            if route_name.is_empty() {
-                rendered.push(format!("如果 {condition_text} 那么 {result}"));
-            } else {
-                rendered.push(format!(
-                    "如果 {condition_text}，路线 {route_name} 那么 {result}"
+            if !route_name.is_empty() {
+                clauses.push(format!("路线 {route_name}"));
+            }
+            let route_conditions = route
+                .conditions
+                .iter()
+                .map(|condition| condition.content.trim())
+                .filter(|condition| !condition.is_empty())
+                .collect::<Vec<_>>();
+            if !route_conditions.is_empty() {
+                let (mode, joiner) = if route.match_mode == "any" {
+                    ("ANY", " 或 ")
+                } else {
+                    ("ALL", " 且 ")
+                };
+                clauses.push(format!(
+                    "分支条件（{mode}） {}",
+                    route_conditions.join(joiner)
                 ));
             }
+            if clauses.is_empty() {
+                continue;
+            }
+            rendered.push(format!("如果 {} 那么 {result}", clauses.join("，")));
         }
     }
     rendered
@@ -2027,7 +2529,10 @@ mod tests {
                 }],
                 routes: vec![
                     RuleRoute {
+                        client_id: "route-fast".to_string(),
                         route: "快速".to_string(),
+                        match_mode: "all".to_string(),
+                        conditions: vec![],
                         result: RuleResult {
                             kind: "requirement".to_string(),
                             requirement: "直接改界面".to_string(),
@@ -2035,7 +2540,10 @@ mod tests {
                         },
                     },
                     RuleRoute {
+                        client_id: "route-full".to_string(),
                         route: "完整".to_string(),
+                        match_mode: "all".to_string(),
+                        conditions: vec![],
                         result: RuleResult {
                             kind: "flow".to_string(),
                             requirement: String::new(),
@@ -2426,6 +2934,107 @@ mod tests {
 
         assert_eq!(proposal.assistant_message, "已生成提案");
         assert!(proposal.markdown.contains("## Custom\nKeep me."));
+    }
+
+    #[test]
+    fn renders_route_specific_conditions_for_branching_flows() {
+        let rule = SkillRule {
+            name: "branch-flow".to_string(),
+            category: "routing".to_string(),
+            conditions: vec![],
+            trigger_conditions: vec![],
+            limit_conditions: vec![],
+            routes: vec![
+                RuleRoute {
+                    client_id: "route-if4".to_string(),
+                    route: "route-3".to_string(),
+                    match_mode: "all".to_string(),
+                    conditions: vec![RuleCondition {
+                        alias: "if4".to_string(),
+                        content: "4".to_string(),
+                    }],
+                    result: RuleResult {
+                        kind: "flow".to_string(),
+                        requirement: String::new(),
+                        steps: vec!["1".to_string(), "2".to_string(), "3".to_string()],
+                    },
+                },
+                RuleRoute {
+                    client_id: "route-if6".to_string(),
+                    route: "route-4".to_string(),
+                    match_mode: "any".to_string(),
+                    conditions: vec![RuleCondition {
+                        alias: "if6".to_string(),
+                        content: "6".to_string(),
+                    }],
+                    result: RuleResult {
+                        kind: "flow".to_string(),
+                        requirement: String::new(),
+                        steps: vec!["1".to_string(), "2".to_string(), "4".to_string()],
+                    },
+                },
+            ],
+            editor_type: "route".to_string(),
+            rule_triggers: vec![],
+            rule_trigger_routes: vec![],
+            rule_limit_links: vec![],
+        };
+
+        assert_eq!(
+            render_rules(&[rule]),
+            vec![
+                "如果 路线 route-3，分支条件（ALL） 4 那么 1→2→3",
+                "如果 路线 route-4，分支条件（ANY） 6 那么 1→2→4",
+            ]
+        );
+    }
+
+    #[test]
+    fn imports_complete_codex_skill_directory_with_source_metadata() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("skill-import-tests")
+            .join(format!("{}-{nonce}", std::process::id()));
+        let source = root.join("source").join("demo");
+        let workspace = root.join("workspace");
+        fs::create_dir_all(source.join("references")).unwrap();
+        fs::create_dir_all(source.join("scripts")).unwrap();
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(
+            source.join(SKILL_FILE_NAME),
+            "---\nname: demo\ndescription: Demo skill\n---\n",
+        )
+        .unwrap();
+        fs::write(source.join("references").join("guide.md"), "# Guide\n").unwrap();
+        fs::write(source.join("scripts").join("check.ps1"), "Write-Output ok\n").unwrap();
+        let source_file = source.join(SKILL_FILE_NAME).canonicalize().unwrap();
+        let source_key = normalized_path_key(&source_file);
+        let entry = CodexSkillCatalogEntry {
+            id: stable_catalog_id(&source_key),
+            name: "demo".to_string(),
+            description: "Demo skill".to_string(),
+            source: "本地技能".to_string(),
+            relative_path: "skills/demo/SKILL.md".to_string(),
+            source_path: source_file.to_string_lossy().to_string(),
+            file_count: 3,
+            byte_size: 80,
+            imported: false,
+            imported_id: None,
+        };
+
+        let imported_id =
+            import_codex_skill_entry(&workspace, &entry).expect("complete directory should import");
+        let imported = workspace.join(&imported_id);
+        assert!(imported.join(SKILL_FILE_NAME).is_file());
+        assert!(imported.join("references").join("guide.md").is_file());
+        assert!(imported.join("scripts").join("check.ps1").is_file());
+        let sources = imported_skill_sources(&workspace);
+        assert_eq!(sources.get(&entry.id), Some(&imported_id));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -927,6 +927,16 @@ a:focus-visible {
   @apply flex h-[min(720px,82vh)] max-w-[880px] flex-col overflow-hidden;
 }
 
+.preview-dialog--graph {
+  width: min(1400px, calc(100vw - 3rem));
+  height: min(860px, calc(100vh - 3rem));
+  max-width: none;
+}
+
+.preview-dialog--graph .rule-graph {
+  margin: 0 -1rem -1rem;
+}
+
 .preview-dialog-head {
   @apply flex h-12 shrink-0 items-center justify-between border-b border-paper-deep/80 pb-3;
 }
@@ -1320,6 +1330,22 @@ select {
 
 .route-top {
   @apply grid min-w-0 grid-cols-[minmax(0,1fr)_82px_28px] gap-2;
+}
+
+.route-condition-head {
+  @apply grid min-w-0 grid-cols-[minmax(0,1fr)_118px_28px] items-center gap-2 border-t border-paper-deep/70 pt-2 text-[10px] font-semibold text-ink-soft;
+}
+
+.route-condition-head select {
+  @apply h-8 min-w-0 rounded-lg border border-paper-deep/80 bg-cloud px-2 text-[9px] text-ink-soft;
+}
+
+.route-condition-head button {
+  @apply flex h-7 w-7 items-center justify-center rounded-full bg-bamboo text-[16px] text-paper transition-colors hover:bg-bamboo-light;
+}
+
+.route-condition-list {
+  @apply grid min-w-0 gap-1;
 }
 
 .flow-steps {

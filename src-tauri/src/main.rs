@@ -7,13 +7,18 @@ use tauri::Manager;
 
 use skill_store::{
     codex_model_status_at, create_skill_at, delete_skill_at, design_skill_at, ensure_manifest_at,
-    legacy_root_from_data_dir, list_skills_at, read_skill_at, set_codex_model_at,
-    translate_rule_to_english_at, update_skill_at, CodexModelStatus, CreateResult,
-    DesignSkillHistoryMessage, DesignSkillRequest, DesignSkillResult, SkillContent, SkillDraft,
-    SkillSummary, TranslationResult,
+    import_codex_skills_at, legacy_root_from_data_dir, list_skills_at, read_skill_at,
+    scan_codex_skills_at, set_codex_model_at, translate_rule_to_english_at, update_skill_at,
+    CodexModelStatus, CodexSkillCatalog, CodexSkillImportRequest, CodexSkillImportResult,
+    CreateResult, DesignSkillHistoryMessage, DesignSkillRequest, DesignSkillResult, SkillContent,
+    SkillDraft, SkillSummary, TranslationResult,
 };
 
 const SIDEBAR_WINDOW_ARG: &str = "--sidebar";
+const SIDEBAR_INITIAL_WIDTH: f64 = 360.0;
+const SIDEBAR_INITIAL_HEIGHT: f64 = 720.0;
+const SIDEBAR_MIN_WIDTH: f64 = 320.0;
+const SIDEBAR_MIN_HEIGHT: f64 = 480.0;
 
 #[tauri::command]
 fn ensure_manifest(app: tauri::AppHandle) -> Result<CreateResult, String> {
@@ -57,6 +62,19 @@ fn update_skill(
     let root = workspace_root(&app)?;
     let legacy_root = legacy_workspace_root(&app)?;
     update_skill_at(&root, &legacy_root, &id, draft)
+}
+
+#[tauri::command]
+fn list_codex_skills(app: tauri::AppHandle) -> Result<CodexSkillCatalog, String> {
+    scan_codex_skills_at(&workspace_root(&app)?)
+}
+
+#[tauri::command]
+fn import_codex_skills(
+    app: tauri::AppHandle,
+    ids: Vec<String>,
+) -> Result<CodexSkillImportResult, String> {
+    import_codex_skills_at(&workspace_root(&app)?, CodexSkillImportRequest { ids })
 }
 
 #[tauri::command]
@@ -118,16 +136,18 @@ fn apply_sidebar_window_geometry(app: &mut tauri::App) -> Result<(), String> {
 
     main.set_title("Skill Agentmd Creator（侧边）")
         .map_err(|error| error.to_string())?;
-    main.set_resizable(false)
+    main.set_decorations(true)
+        .map_err(|error| error.to_string())?;
+    main.set_resizable(true)
         .map_err(|error| error.to_string())?;
     main.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize {
-        width: 360.0,
-        height: 720.0,
+        width: SIDEBAR_MIN_WIDTH,
+        height: SIDEBAR_MIN_HEIGHT,
     })))
     .map_err(|error| error.to_string())?;
     main.set_size(tauri::Size::Logical(tauri::LogicalSize {
-        width: 360.0,
-        height: 720.0,
+        width: SIDEBAR_INITIAL_WIDTH,
+        height: SIDEBAR_INITIAL_HEIGHT,
     }))
     .map_err(|error| error.to_string())?;
     main.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
@@ -161,6 +181,8 @@ fn main() {
             create_skill,
             delete_skill,
             update_skill,
+            list_codex_skills,
+            import_codex_skills,
             ping_backend,
             codex_status,
             set_codex_model,

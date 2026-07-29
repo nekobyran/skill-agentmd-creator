@@ -1969,3 +1969,21 @@ html[data-quality="low"] .ambient-fallback {
     transform: translate(-50%, -50%) rotateZ(-2deg);
   }
 }
+
+/* NKBR unified sponsor block */
+.nkbr-support{position:relative;isolation:isolate;display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,420px);gap:clamp(42px,8vw,128px);align-items:center;width:min(100%,1440px);margin-inline:auto;padding:clamp(92px,11vw,160px) clamp(20px,5vw,76px);border-top:1px solid rgba(23,51,41,.16);overflow:hidden;color:#173329}
+.nkbr-support::before{content:"";position:absolute;z-index:-1;width:min(52vw,650px);aspect-ratio:1;right:-22%;top:-34%;border-radius:50%;background:radial-gradient(circle,rgba(166,216,103,.28),rgba(121,185,106,.08) 42%,transparent 70%);filter:blur(8px);animation:nkbr-support-breathe 8s ease-in-out infinite}
+.nkbr-support__eyebrow{margin:0 0 22px;color:#4e7b3d;font:800 9px/1.4 ui-monospace,"Cascadia Code",Consolas,monospace;letter-spacing:.2em}
+.nkbr-support__copy h2{margin:0;color:#0d241c;font-family:"Iowan Old Style","Baskerville","Songti SC","STSong",serif;font-size:clamp(44px,5.2vw,78px);font-weight:400;line-height:1.02;letter-spacing:-.055em}
+.nkbr-support__copy>p:not(.nkbr-support__eyebrow){max-width:650px;margin:25px 0 0;color:rgba(23,51,41,.66);font-family:"Iowan Old Style","Baskerville","Songti SC","STSong",serif;font-size:clamp(15px,1.3vw,18px);line-height:1.85}
+.nkbr-support__copy>a{display:inline-flex;margin-top:28px;color:#4e7b3d;font:700 10px/1 ui-monospace,"Cascadia Code",Consolas,monospace;letter-spacing:.1em;text-decoration:none}
+.nkbr-support__code{position:relative;justify-self:end;width:min(100%,390px);margin:0;padding:22px;border:1px solid rgba(23,51,41,.3);background:rgba(252,253,247,.82);box-shadow:18px 18px 0 rgba(78,123,61,.09);overflow:hidden;backdrop-filter:blur(12px)}
+.nkbr-support__code img{position:relative;z-index:2;display:block;width:100%;height:auto;background:#fff}
+.nkbr-support__code figcaption{position:relative;z-index:2;margin-top:15px;color:rgba(23,51,41,.66);font:800 9px/1 ui-monospace,"Cascadia Code",Consolas,monospace;letter-spacing:.16em;text-align:center}
+.nkbr-support__orbit{position:absolute;z-index:1;width:250px;height:250px;right:-110px;top:-120px;border:1px dashed rgba(78,123,61,.38);border-radius:50%;animation:nkbr-support-orbit 20s linear infinite}
+.nkbr-support__orbit i{position:absolute;width:9px;height:9px;left:50%;top:-5px;border-radius:50%;background:#a6d867;box-shadow:0 0 24px rgba(166,216,103,.72)}
+@keyframes nkbr-support-orbit{to{transform:rotate(360deg)}}
+@keyframes nkbr-support-breathe{50%{opacity:.56;transform:scale(1.08)}}
+@media(max-width:900px){.nkbr-support{grid-template-columns:1fr}.nkbr-support__code{justify-self:start}}
+@media(max-width:600px){.nkbr-support{padding-inline:20px}.nkbr-support__code{padding:16px;box-shadow:10px 10px 0 rgba(78,123,61,.09)}}
+@media(prefers-reduced-motion:reduce){.nkbr-support::before,.nkbr-support__orbit{animation:none!important}}
