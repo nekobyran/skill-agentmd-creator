@@ -104,9 +104,11 @@ if (failures.length === 0) {
     const assets = Array.isArray(release.assets) ? release.assets : [];
     checks.push(
       [release.status === 'verified' || release.status === 'published', 'Windows release is verified'],
-      [assets.length === 2, 'Installer and portable assets exist'],
+            [assets.length === 1 && assets[0]?.kind === 'portable', 'Flutter portable ZIP asset exists'],
       [assets.every((asset) => Number.isSafeInteger(asset.sizeBytes) && asset.sizeBytes > 0), 'Asset sizes are valid'],
       [assets.every((asset) => /^[a-f0-9]{64}$/u.test(asset.sha256 || '')), 'Asset SHA-256 values are valid'],
+      [assets.every((asset) => /-Portable\.zip$/iu.test(asset.name || '')), 'Portable asset uses ZIP packaging'],
+
     );
   }
 

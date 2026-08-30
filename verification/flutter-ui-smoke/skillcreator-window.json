@@ -1,0 +1,25 @@
+{
+    "capturedAt":  "2026-08-30T11:27:12.6980944+08:00",
+    "appPid":  1656,
+    "appSessionId":  1,
+    "appResponding":  true,
+    "title":  "SkillCreator",
+    "mainWindowHandle":  52758546,
+    "visible":  true,
+    "minimized":  false,
+    "dpi":  96,
+    "rect":  {
+                 "left":  0,
+                 "top":  0,
+                 "width":  1024,
+                 "height":  720
+             },
+    "captureMethod":  "PrintWindow",
+    "imagePath":  "D:\\vibecoding\\project\\skill creator\\verification\\flutter-ui-smoke\\skillcreator-window.png",
+    "imageBytes":  75548,
+    "sidecarPid":  28036,
+    "sidecarSessionId":  1,
+    "health":  {
+                   "error":  "远程服务器返回错误: (404) 未找到。"
+               }
+}

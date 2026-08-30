@@ -66,14 +66,15 @@ const FALLBACK_RELEASE = {
 const renderRelease = (release) => {
   const data = { ...FALLBACK_RELEASE, ...release };
   const assets = Array.isArray(data.assets) ? data.assets : [];
-  const installer = assets.find((asset) => asset.kind === 'installer') || {};
-  const portable = assets.find((asset) => asset.kind === 'portable') || {};
+    const portable = assets.find((asset) => asset.kind === 'portable') || {};
+
   const releaseUrl = data.releaseUrl || FALLBACK_RELEASE.releaseUrl;
   const tag = data.tag || (data.version ? `v${data.version}` : 'Latest');
   const ready = data.status === 'published';
 
   const primaryRelease = byId('primary-release-link');
-  if (primaryRelease) primaryRelease.href = installer.url || releaseUrl;
+    if (primaryRelease) primaryRelease.href = portable.url || releaseUrl;
+
   const releaseLink = byId('release-link');
   if (releaseLink) releaseLink.href = releaseUrl;
   const headerRelease = document.querySelector('.header-release');
@@ -83,21 +84,20 @@ const renderRelease = (release) => {
   byId('release-version').textContent = tag;
   byId('release-date').textContent = formatReleaseDate(data.publishedAt);
   byId('release-state').textContent = ready ? 'RELEASED' : 'UNAVAILABLE';
-  byId('installer-name').textContent = installer.name || '发布清单暂不可用';
-  byId('installer-size').textContent = formatFileSize(installer.sizeBytes);
-  byId('portable-name').textContent = portable.name || '发布清单暂不可用';
+    byId('portable-name').textContent = portable.name || '发布清单暂不可用';
   byId('portable-size').textContent = formatFileSize(portable.sizeBytes);
-  byId('release-checksum').textContent = installer.sha256 || 'SHA-256 unavailable';
+  byId('release-checksum').textContent = portable.sha256 || 'SHA-256 unavailable';
 
   const copyButton = byId('copy-checksum');
   if (copyButton) {
     copyButton.disabled = true;
     delete copyButton.dataset.checksum;
-    if (/^[a-f0-9]{64}$/iu.test(installer.sha256 || '')) {
+    if (/^[a-f0-9]{64}$/iu.test(portable.sha256 || '')) {
       copyButton.disabled = false;
-      copyButton.dataset.checksum = installer.sha256;
+      copyButton.dataset.checksum = portable.sha256;
     }
   }
+
 
 };
 

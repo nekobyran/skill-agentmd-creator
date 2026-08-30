@@ -1,0 +1,53 @@
+{
+    "capturedAt":  "2026-08-30T11:27:23.8802230+08:00",
+    "pid":  1656,
+    "title":  "SkillCreator",
+    "nodeCount":  2,
+    "namedNodeCount":  2,
+    "uniqueNames":  [
+                        "SkillCreator",
+                        "FLUTTERVIEW"
+                    ],
+    "coreTextHits":  {
+                         "skillCreator":  1,
+                         "editor":  1
+                     },
+    "pixelStats":  {
+                       "width":  1024,
+                       "height":  720,
+                       "samples":  3072,
+                       "nonBlackSamples":  3071,
+                       "nonBlackRatio":  0.9997,
+                       "uniqueSampleColors":  141
+                   },
+    "nodes":  [
+                  {
+                      "depth":  0,
+                      "name":  "SkillCreator",
+                      "automationId":  "",
+                      "controlType":  "ControlType.Window",
+                      "enabled":  true,
+                      "offscreen":  false,
+                      "rect":  {
+                                   "x":  0,
+                                   "y":  0,
+                                   "width":  1024,
+                                   "height":  720
+                               }
+                  },
+                  {
+                      "depth":  1,
+                      "name":  "FLUTTERVIEW",
+                      "automationId":  "",
+                      "controlType":  "ControlType.Pane",
+                      "enabled":  true,
+                      "offscreen":  false,
+                      "rect":  {
+                                   "x":  0,
+                                   "y":  0,
+                                   "width":  1024,
+                                   "height":  720
+                               }
+                  }
+              ]
+}

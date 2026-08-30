@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "skillMarker": "flutter-app-design@init-1",
+  "state": "complete",
+  "platforms": [
+    "windows"
+  ],
+  "template": {
+    "id": "manual-tauri-to-flutter-migration",
+    "version": 1
+  },
+  "completedChecks": [
+    "material3-theme",
+    "app-escape-dispatcher",
+    "windows-custom-title-bar-contract",
+    "windows-dpi-minimum-720x560",
+    "windows-default-window-1301x855",
+    "windows-dwm-corners-caption-channel",
+    "dart-format",
+    "flutter-analyze",
+    "flutter-test",
+    "windows-debug-build"
+  ],
+  "projectIdentityMaterialized": true,
+  "verifiedAt": "2026-08-27T22:34:18.0313378+08:00"
+}

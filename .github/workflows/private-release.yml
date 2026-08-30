@@ -45,31 +45,54 @@ jobs:
           if ($tag -notmatch '^v(?<version>\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$') {
             throw "Invalid SkillCreator release tag: $tag"
           }
-          $package = Get-Content -LiteralPath package.json -Raw -Encoding UTF8 | ConvertFrom-Json
-          if ([string]$package.version -cne $Matches.version) {
-            throw "Tag version $($Matches.version) does not match package.json $($package.version)."
+          $pubspec = Get-Content -LiteralPath project/skillcreator-flutter/pubspec.yaml -Raw -Encoding UTF8
+          $flutterMatch = [regex]::Match($pubspec, '(?m)^version:\s*(?<version>[^\s+]+)(?:\+[^\s]+)?\s*$')
+          if (-not $flutterMatch.Success -or $flutterMatch.Groups['version'].Value -cne $Matches.version) {
+            throw "Tag version $($Matches.version) does not match Flutter pubspec."
+          }
+          $cargo = Get-Content -LiteralPath project/skillcreator-rust-server/Cargo.toml -Raw -Encoding UTF8
+          $cargoMatch = [regex]::Match($cargo, '(?ms)^\[package\]\s*.*?^version\s*=\s*"(?<version>[^"]+)"')
+          if (-not $cargoMatch.Success -or $cargoMatch.Groups['version'].Value -cne $Matches.version) {
+            throw "Tag version $($Matches.version) does not match Rust Cargo.toml."
           }
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "version=$($Matches.version)" >> $env:GITHUB_OUTPUT
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
         with:
-          node-version: '22'
-          cache: npm
+          channel: stable
+          cache: true
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
 
-      - name: Install locked frontend dependencies
-        run: npm ci
+      - name: Verify Flutter client
+        shell: pwsh
+        working-directory: project/skillcreator-flutter
+        run: |
+          flutter pub get
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze
+          flutter test
 
-      - name: Build Windows x64 NSIS bundle
-        run: npm run tauri -- build --target x86_64-pc-windows-msvc
+      - name: Verify and build Rust sidecar
+        shell: pwsh
+        run: |
+          cargo fmt --manifest-path project/skillcreator-rust-server/Cargo.toml -- --check
+          cargo clippy --manifest-path project/skillcreator-rust-server/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path project/skillcreator-rust-server/Cargo.toml
+          cargo build --manifest-path project/skillcreator-rust-server/Cargo.toml --release --target x86_64-pc-windows-msvc
 
-      - name: Normalize release assets and checksums
+      - name: Build Flutter Windows release
+        shell: pwsh
+        working-directory: project/skillcreator-flutter
+        run: flutter build windows --release
+
+      - name: Assemble portable bundle
         id: assets
         shell: pwsh
         env:
@@ -77,46 +100,70 @@ jobs:
           TAG: ${{ steps.release.outputs.tag }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $target = Join-Path 'src-tauri/target/x86_64-pc-windows-msvc/release' ''
-          $portableSource = Join-Path $target 'skill-agentmd-creator.exe'
-          $setupSource = Get-ChildItem -LiteralPath (Join-Path $target 'bundle/nsis') -Filter '*.exe' -File | Select-Object -First 1
-          if (-not (Test-Path -LiteralPath $portableSource -PathType Leaf)) {
-            throw "Portable executable not found: $portableSource"
+          $runner = 'project/skillcreator-flutter/build/windows/x64/runner/Release'
+          $sidecar = 'project/skillcreator-rust-server/target/x86_64-pc-windows-msvc/release/skill_api_server.exe'
+          foreach ($required in @(
+            (Join-Path $runner 'skillcreator_flutter.exe'),
+            (Join-Path $runner 'flutter_windows.dll'),
+            (Join-Path $runner 'data'),
+            $sidecar
+          )) {
+            if (-not (Test-Path -LiteralPath $required)) {
+              throw "Required release artifact is missing: $required"
+            }
           }
-          if (-not $setupSource) {
-            throw 'NSIS installer was not produced.'
-          }
+          Copy-Item -LiteralPath $sidecar -Destination (Join-Path $runner 'skill_api_server.exe') -Force
 
           $releaseRoot = Join-Path 'release/github_release' $env:TAG
-          New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
-          $setupName = "SkillCreator-v$env:VERSION-Windows-x64-Setup.exe"
-          $portableName = "SkillCreator-v$env:VERSION-Windows-x64-Portable.exe"
-          $setupPath = Join-Path $releaseRoot $setupName
-          $portablePath = Join-Path $releaseRoot $portableName
-          Copy-Item -LiteralPath $setupSource.FullName -Destination $setupPath -Force
-          Copy-Item -LiteralPath $portableSource -Destination $portablePath -Force
+          $stage = Join-Path $releaseRoot "SkillCreator-$env:TAG-Windows-x64"
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item -Path (Join-Path $runner '*') -Destination $stage -Recurse -Force
 
-          $setupHash = (Get-FileHash -LiteralPath $setupPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          $portableHash = (Get-FileHash -LiteralPath $portablePath -Algorithm SHA256).Hash.ToLowerInvariant()
-          @(
-            "$setupHash  $setupName"
-            "$portableHash  $portableName"
-          ) | Set-Content -LiteralPath (Join-Path $releaseRoot 'SHA256SUMS.txt') -Encoding ascii
+          $zipName = "SkillCreator-$env:TAG-Windows-x64-Portable.zip"
+          $zipPath = Join-Path $releaseRoot $zipName
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipPath -CompressionLevel Optimal -Force
+          $zipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $checksums = Join-Path $releaseRoot 'SHA256SUMS.txt'
+          "$zipHash  $zipName" | Set-Content -LiteralPath $checksums -Encoding ascii
+
+          $bundleFiles = Get-ChildItem -LiteralPath $stage -Recurse -File | ForEach-Object {
+            $hash = Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256
+            [ordered]@{
+              path = [IO.Path]::GetRelativePath($stage, $_.FullName).Replace('\', '/')
+              bytes = $_.Length
+              sha256 = $hash.Hash.ToLowerInvariant()
+            }
+          }
+          $manifestPath = Join-Path $releaseRoot "SkillCreator-$env:TAG-manifest.json"
+          [ordered]@{
+            product = 'SkillCreator'
+            framework = 'Flutter'
+            backend = 'Rust sidecar'
+            version = $env:VERSION
+            tag = $env:TAG
+            platform = 'windows-x64'
+            generatedAtUtc = [DateTime]::UtcNow.ToString('o')
+            portableArchive = [ordered]@{
+              name = $zipName
+              bytes = (Get-Item -LiteralPath $zipPath).Length
+              sha256 = $zipHash
+            }
+            bundleFiles = @($bundleFiles)
+          } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
 
           "root=$releaseRoot" >> $env:GITHUB_OUTPUT
-          "setup=$setupPath" >> $env:GITHUB_OUTPUT
-          "portable=$portablePath" >> $env:GITHUB_OUTPUT
-          "checksums=$(Join-Path $releaseRoot 'SHA256SUMS.txt')" >> $env:GITHUB_OUTPUT
-          "setup_sha256=$setupHash" >> $env:GITHUB_OUTPUT
+          "portable=$zipPath" >> $env:GITHUB_OUTPUT
+          "checksums=$checksums" >> $env:GITHUB_OUTPUT
+          "manifest=$manifestPath" >> $env:GITHUB_OUTPUT
 
       - name: Verify repository visibility and publish prerelease
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
-          SETUP: ${{ steps.assets.outputs.setup }}
           PORTABLE: ${{ steps.assets.outputs.portable }}
           CHECKSUMS: ${{ steps.assets.outputs.checksums }}
+          MANIFEST: ${{ steps.assets.outputs.manifest }}
           REPLACE_EXISTING: ${{ inputs.replace_existing }}
         run: |
           $ErrorActionPreference = 'Stop'
@@ -128,14 +175,15 @@ jobs:
           $exists = $true
           gh release view $env:TAG --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -ne 0) { $exists = $false }
+          $assets = @($env:PORTABLE, $env:CHECKSUMS, $env:MANIFEST)
           if ($exists) {
             if ($env:REPLACE_EXISTING -ne 'true') {
               throw "Release $env:TAG already exists. Enable replace_existing only for an intentional replacement."
             }
-            gh release upload $env:TAG $env:SETUP $env:PORTABLE $env:CHECKSUMS --repo $env:GITHUB_REPOSITORY --clobber
+            gh release upload $env:TAG @assets --repo $env:GITHUB_REPOSITORY --clobber
             gh release edit $env:TAG --repo $env:GITHUB_REPOSITORY --title "SkillCreator $env:TAG" --notes-file RELEASE_NOTES.md --prerelease --latest=false
           } else {
-            gh release create $env:TAG $env:SETUP $env:PORTABLE $env:CHECKSUMS --repo $env:GITHUB_REPOSITORY --title "SkillCreator $env:TAG" --notes-file RELEASE_NOTES.md --prerelease --latest=false --target $env:GITHUB_SHA
+            gh release create $env:TAG @assets --repo $env:GITHUB_REPOSITORY --title "SkillCreator $env:TAG" --notes-file RELEASE_NOTES.md --prerelease --latest=false --target $env:GITHUB_SHA
           }
 
       - name: Verify release assets
