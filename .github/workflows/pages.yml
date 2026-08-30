@@ -5,13 +5,19 @@ on:
   push:
     branches: [main]
     paths:
-      - 'site/**'
+      - 'project/skillcreator-site-static/**'
+      - 'project/skillcreator-flutter/pubspec.yaml'
+      - 'command/Build-SkillCreatorSite.mjs'
       - 'command/Verify-SkillCreatorSite.mjs'
+      - 'RELEASE_NOTES.md'
       - '.github/workflows/pages.yml'
   pull_request:
     paths:
-      - 'site/**'
+      - 'project/skillcreator-site-static/**'
+      - 'project/skillcreator-flutter/pubspec.yaml'
+      - 'command/Build-SkillCreatorSite.mjs'
       - 'command/Verify-SkillCreatorSite.mjs'
+      - 'RELEASE_NOTES.md'
       - '.github/workflows/pages.yml'
 
 permissions:
@@ -34,13 +40,16 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Verify static release page
-        run: node command/Verify-SkillCreatorSite.mjs --require-release
+      - name: Build static release page
+        run: node command/Build-SkillCreatorSite.mjs
+
+      - name: Verify built release page
+        run: node command/Verify-SkillCreatorSite.mjs --root=release/skillcreator-site-static/web/release --require-release
 
       - name: Upload verified static page
         uses: actions/upload-artifact@v4
         with:
           name: skillcreator-release-page-${{ github.sha }}
-          path: site
+          path: release/skillcreator-site-static/web/release
           if-no-files-found: error
           retention-days: 14
