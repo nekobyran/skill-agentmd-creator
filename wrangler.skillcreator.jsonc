@@ -10,7 +10,7 @@
     }
   ],
   "assets": {
-    "directory": "./release/skillcreator_site_Web/release",
+    "directory": "./release/skillcreator-site-static/web/release",
     "binding": "ASSETS",
     "run_worker_first": true,
     "html_handling": "auto-trailing-slash",

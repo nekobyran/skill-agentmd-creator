@@ -11,8 +11,8 @@ $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $configPath = Join-Path $projectRoot 'wrangler.skillcreator.jsonc'
 $buildScript = Join-Path $PSScriptRoot 'Build-SkillCreatorSite.mjs'
 $verifyScript = Join-Path $PSScriptRoot 'Verify-SkillCreatorSite.mjs'
-$outputRoot = Join-Path $projectRoot 'release\skillcreator_site_Web\release'
-$deployStatusPath = Join-Path $projectRoot 'release\skillcreator_site_Web\deploy-status.json'
+$outputRoot = Join-Path $projectRoot 'release\skillcreator-site-static\web\release'
+$deployStatusPath = Join-Path $projectRoot 'release\skillcreator-site-static\web\deploy-status.json'
 $domain = 'skillcreator.nkbr.cc'
 $wranglerVersion = '4.114.0'
 
@@ -74,7 +74,7 @@ function Assert-Configuration {
     if (
         $config -notmatch '"pattern"\s*:\s*"skillcreator\.nkbr\.cc"' -or
         $config -notmatch '"custom_domain"\s*:\s*true' -or
-        $config -notmatch '"directory"\s*:\s*"\.\/release\/skillcreator_site_Web\/release"'
+        $config -notmatch '"directory"\s*:\s*"\.\/release\/skillcreator-site-static\/web\/release"'
     ) {
         throw "Cloudflare 配置未绑定 $domain 的静态产物目录。"
     }
@@ -118,7 +118,7 @@ function Invoke-SiteBuildAndVerification {
     Invoke-Captured -FilePath $Node -Arguments @($buildScript) -WorkingDirectory $projectRoot | Out-Null
     Invoke-Captured -FilePath $Node -Arguments @(
         $verifyScript,
-        '--root=release/skillcreator_site_Web/release',
+        '--root=release/skillcreator-site-static/web/release',
         '--require-release'
     ) -WorkingDirectory $projectRoot | Out-Null
 }

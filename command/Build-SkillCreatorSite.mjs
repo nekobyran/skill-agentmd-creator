@@ -5,12 +5,19 @@ import { fileURLToPath } from 'node:url';
 
 const commandRoot = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(commandRoot, '..');
-const sourceRoot = path.join(projectRoot, 'site');
-const outputRoot = path.join(projectRoot, 'release', 'skillcreator_site_Web', 'release');
+const sourceRoot = path.join(projectRoot, 'project', 'skillcreator-site-static');
+const outputRoot = path.join(
+  projectRoot,
+  'release',
+  'skillcreator-site-static',
+  'web',
+  'release',
+);
 const stagingRoot = path.join(
   projectRoot,
   'release',
-  'skillcreator_site_Web',
+  'skillcreator-site-static',
+  'web',
   `.release-staging-${process.pid}`,
 );
 

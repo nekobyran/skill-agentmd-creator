@@ -7,15 +7,15 @@
   "visibility": "public",
   "repository": "nekobyran/skill-agentmd-creator",
   "releaseUrl": "https://github.com/nekobyran/skill-agentmd-creator/releases/tag/v1.0.0",
-  "publishedAt": "2026-08-29T16:28:24.9408563Z",
+  "publishedAt": "2026-08-30T18:24:20.5305049Z",
   "platform": "Windows",
   "architecture": "x64",
   "assets": [
     {
       "kind": "portable",
       "name": "SkillCreator-v1.0.0-Windows-x64-Portable.zip",
-      "sizeBytes": 14422807,
-      "sha256": "033a6e84eb1b5e03bec27afa234a75750347e84717ac09514a02a1cd94d628f2"
+      "sizeBytes": 14450854,
+      "sha256": "f1776bce893d0b8d9b0562ec7d18bc2d69477d3c209d5a72047b47a528184054"
     }
   ],
   "checks": [

@@ -9,7 +9,7 @@ const requireRelease = process.argv.includes('--require-release');
 const explicitRoot = process.argv.find((argument) => argument.startsWith('--root='));
 const siteRoot = explicitRoot
   ? path.resolve(projectRoot, explicitRoot.slice('--root='.length))
-  : path.join(projectRoot, 'site');
+  : path.join(projectRoot, 'project', 'skillcreator-site-static');
 
 const requiredFiles = [
   'index.html',

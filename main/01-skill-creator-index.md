@@ -45,7 +45,8 @@
 - Windows portable 发布脚本：`command/Publish-SkillCreator.ps1`
 - Windows portable 产物：`release/skillcreator-flutter/windows/release/`
 - GitHub Windows prerelease CI：`.github/workflows/private-release.yml`
-- 静态发布页：`site/`
+- 静态发布页源码：`project/skillcreator-site-static/`
+- 静态发布页产物：`release/skillcreator-site-static/web/release/`
 - 站点构建器：`command/Build-SkillCreatorSite.mjs`
 - 站点验证器：`command/Verify-SkillCreatorSite.mjs`
 - Cloudflare 构建/部署：`command/Deploy-SkillCreatorSite.ps1`
