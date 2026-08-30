@@ -139,7 +139,7 @@ pwsh -NoProfile -File .\command\test-skillcreator-cli.ps1
 - 静态官网：`site/`
 - 官网构建/部署：`command/Build-SkillCreatorSite.mjs`、`command/Deploy-SkillCreatorSite.ps1`
 
-`src/` 下的旧 WinUI/C++ 实现仅作为历史参考，不是当前启动入口。
+旧 WinUI/C++ 桌面原型及其 `SkillAgentTool.sln` 已从当前源码树移除；桌面 GUI 只保留 Flutter 实现，后台只保留独立 Rust server。
 
 ## 发布
 

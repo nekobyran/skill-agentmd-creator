@@ -56,7 +56,8 @@
 
 - `frontend/` React/Vite GUI 已删除。
 - `src-tauri/` Tauri runtime/backend 已删除。
+- 旧 `SkillAgentTool.sln`、`src/SkillAgentTool/` WinUI/.NET 原型和 `src/SkillAgentBridgeCpp/` C++ bridge 已删除。
 - 根 `package.json`、`package-lock.json`、`tsconfig.json`、`vite.config.ts` 已删除。
-- 桌面 GUI 唯一受支持实现为 Flutter；后台唯一受支持实现为独立 Rust server。不存在 Tauri 兼容壳或旧 GUI fallback。
+- 桌面 GUI 唯一受支持实现为 Flutter；后台唯一受支持实现为独立 Rust server。不存在 Tauri、WinUI/C++ 兼容壳或旧 GUI fallback。
 
 新增、迁移或删除上述关键入口、工程或发布目录时，同步更新本索引。
