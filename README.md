@@ -136,7 +136,7 @@ pwsh -NoProfile -File .\command\test-skillcreator-cli.ps1
 - CLI：`command/Invoke-SkillCreator.ps1`
 - 本地运行/构建：`command/run.ps1`
 - Windows 发布：`command/Publish-SkillCreator.ps1`
-- 静态官网：`project/skillcreator-site-static/`
+- 静态官网：`project/skillcreator-site-static/`（静态资源、Cloudflare `worker.js` / `wrangler.jsonc` 与 Worker 测试同工程维护）
 - 静态官网构建产物：`release/skillcreator-site-static/web/release/`
 - 官网构建/部署：`command/Build-SkillCreatorSite.mjs`、`command/Deploy-SkillCreatorSite.ps1`
 

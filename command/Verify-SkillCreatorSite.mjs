@@ -5,11 +5,12 @@ import { fileURLToPath } from 'node:url';
 
 const commandRoot = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(commandRoot, '..');
+const engineeringRoot = path.join(projectRoot, 'project', 'skillcreator-site-static');
 const requireRelease = process.argv.includes('--require-release');
 const explicitRoot = process.argv.find((argument) => argument.startsWith('--root='));
 const siteRoot = explicitRoot
   ? path.resolve(projectRoot, explicitRoot.slice('--root='.length))
-  : path.join(projectRoot, 'project', 'skillcreator-site-static');
+  : engineeringRoot;
 
 const requiredFiles = [
   'index.html',
@@ -47,7 +48,7 @@ if (failures.length === 0) {
       readText('release.json'),
       readText('manifest.webmanifest'),
       readFile(path.join(siteRoot, 'assets/sponsor.jpg')),
-      readFile(path.join(projectRoot, 'worker.skillcreator.js'), 'utf8'),
+            readFile(path.join(engineeringRoot, 'worker.js'), 'utf8'),
     ]);
 
   let release;
@@ -125,8 +126,15 @@ if (failures.length === 0) {
     /[A-Z]:\\vibecoding\\/u,
   ];
 
-  const entries = await readdir(siteRoot, { recursive: true });
+    const entries = await readdir(siteRoot, { recursive: true });
   for (const relativePath of entries) {
+    if (
+      siteRoot.includes(`${path.sep}release${path.sep}`) &&
+      /^(?:worker\.js|wrangler\.jsonc|test(?:[\\/]|$))/u.test(relativePath)
+    ) {
+      failures.push(`Static release must not include engineering file: ${relativePath}`);
+      continue;
+    }
     if (/\.(?:exe|msi|zip|pdb|dll)$/iu.test(relativePath)) {
       failures.push(`Static site must not host release binary: ${relativePath}`);
       continue;

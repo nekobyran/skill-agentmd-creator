@@ -20,6 +20,7 @@ const stagingRoot = path.join(
   'web',
   `.release-staging-${process.pid}`,
 );
+const nonStaticTopLevelEntries = new Set(['test', 'worker.js', 'wrangler.jsonc']);
 
 const readText = (filePath) => readFile(filePath, 'utf8');
 const readJson = async (filePath) => JSON.parse(await readText(filePath));
@@ -125,7 +126,15 @@ if (manifestDetails?.isFile()) {
 await rm(stagingRoot, { recursive: true, force: true });
 await mkdir(stagingRoot, { recursive: true });
 try {
-  await cp(sourceRoot, stagingRoot, { recursive: true });
+    await cp(sourceRoot, stagingRoot, {
+    recursive: true,
+    filter: (source) => {
+      const relative = path.relative(sourceRoot, source);
+      if (!relative) return true;
+      const [topLevel] = relative.split(path.sep);
+      return !nonStaticTopLevelEntries.has(topLevel);
+    },
+  });
 
   const [indexTemplate, stylesheetBytes, scriptBytes] = await Promise.all([
     readText(path.join(stagingRoot, 'index.html')),

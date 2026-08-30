@@ -1,6 +1,6 @@
 {
   "name": "skillcreator-release-site",
-  "main": "./worker.skillcreator.js",
+    "main": "./worker.js",
   "compatibility_date": "2026-07-28",
   "workers_dev": false,
   "routes": [
@@ -10,7 +10,7 @@
     }
   ],
   "assets": {
-    "directory": "./release/skillcreator-site-static/web/release",
+        "directory": "../../release/skillcreator-site-static/web/release",
     "binding": "ASSETS",
     "run_worker_first": true,
     "html_handling": "auto-trailing-slash",

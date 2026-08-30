@@ -8,7 +8,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$configPath = Join-Path $projectRoot 'wrangler.skillcreator.jsonc'
+$configPath = Join-Path $projectRoot 'project\skillcreator-site-static\wrangler.jsonc'
 $buildScript = Join-Path $PSScriptRoot 'Build-SkillCreatorSite.mjs'
 $verifyScript = Join-Path $PSScriptRoot 'Verify-SkillCreatorSite.mjs'
 $outputRoot = Join-Path $projectRoot 'release\skillcreator-site-static\web\release'
@@ -74,7 +74,7 @@ function Assert-Configuration {
     if (
         $config -notmatch '"pattern"\s*:\s*"skillcreator\.nkbr\.cc"' -or
         $config -notmatch '"custom_domain"\s*:\s*true' -or
-        $config -notmatch '"directory"\s*:\s*"\.\/release\/skillcreator-site-static\/web\/release"'
+        $config -notmatch '"directory"\s*:\s*"\.\.\/\.\.\/release\/skillcreator-site-static\/web\/release"'
     ) {
         throw "Cloudflare 配置未绑定 $domain 的静态产物目录。"
     }

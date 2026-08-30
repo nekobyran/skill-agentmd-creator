@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import worker from '../worker.skillcreator.js';
+import worker from '../worker.js';
 
 const env = {
   ASSETS: {
