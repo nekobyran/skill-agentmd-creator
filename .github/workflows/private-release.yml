@@ -92,7 +92,7 @@ jobs:
         working-directory: project/skillcreator-flutter
         run: flutter build windows --release
 
-      - name: Assemble portable bundle
+      - name: Package portable bundle
         id: assets
         shell: pwsh
         env:
@@ -114,47 +114,22 @@ jobs:
           }
           Copy-Item -LiteralPath $sidecar -Destination (Join-Path $runner 'skill_api_server.exe') -Force
 
-          $releaseRoot = Join-Path 'release/github_release' $env:TAG
-          $stage = Join-Path $releaseRoot "SkillCreator-$env:TAG-Windows-x64"
-          New-Item -ItemType Directory -Path $stage -Force | Out-Null
-          Copy-Item -Path (Join-Path $runner '*') -Destination $stage -Recurse -Force
+          & ./command/Publish-SkillCreator.ps1 -Version $env:VERSION -SkipBuild -BundleSource $runner
 
-          $zipName = "SkillCreator-$env:TAG-Windows-x64-Portable.zip"
-          $zipPath = Join-Path $releaseRoot $zipName
-          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipPath -CompressionLevel Optimal -Force
-          $zipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          $checksums = Join-Path $releaseRoot 'SHA256SUMS.txt'
-          "$zipHash  $zipName" | Set-Content -LiteralPath $checksums -Encoding ascii
-
-          $bundleFiles = Get-ChildItem -LiteralPath $stage -Recurse -File | ForEach-Object {
-            $hash = Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256
-            [ordered]@{
-              path = [IO.Path]::GetRelativePath($stage, $_.FullName).Replace('\', '/')
-              bytes = $_.Length
-              sha256 = $hash.Hash.ToLowerInvariant()
+          $releaseRoot = 'release/skillcreator-flutter/windows/release'
+          $portable = Join-Path $releaseRoot "SkillCreator-$env:TAG-Windows-x64-Portable.zip"
+          $checksums = Join-Path $releaseRoot "SkillCreator-$env:TAG-SHA256.txt"
+          $manifest = Join-Path $releaseRoot "SkillCreator-$env:TAG-manifest.json"
+          foreach ($required in @($portable, $checksums, $manifest)) {
+            if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+              throw "Packaged release artifact is missing: $required"
             }
           }
-          $manifestPath = Join-Path $releaseRoot "SkillCreator-$env:TAG-manifest.json"
-          [ordered]@{
-            product = 'SkillCreator'
-            framework = 'Flutter'
-            backend = 'Rust sidecar'
-            version = $env:VERSION
-            tag = $env:TAG
-            platform = 'windows-x64'
-            generatedAtUtc = [DateTime]::UtcNow.ToString('o')
-            portableArchive = [ordered]@{
-              name = $zipName
-              bytes = (Get-Item -LiteralPath $zipPath).Length
-              sha256 = $zipHash
-            }
-            bundleFiles = @($bundleFiles)
-          } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
 
           "root=$releaseRoot" >> $env:GITHUB_OUTPUT
-          "portable=$zipPath" >> $env:GITHUB_OUTPUT
+          "portable=$portable" >> $env:GITHUB_OUTPUT
           "checksums=$checksums" >> $env:GITHUB_OUTPUT
-          "manifest=$manifestPath" >> $env:GITHUB_OUTPUT
+          "manifest=$manifest" >> $env:GITHUB_OUTPUT
 
       - name: Verify repository visibility and publish prerelease
         shell: pwsh
@@ -198,7 +173,17 @@ jobs:
             throw 'SkillCreator release is not a visible prerelease.'
           }
           $names = @($release.assets | ForEach-Object { $_.name })
-          if ('SHA256SUMS.txt' -notin $names -or $names.Count -ne 3) {
+          $expected = @(
+            "SkillCreator-$env:TAG-Windows-x64-Portable.zip",
+            "SkillCreator-$env:TAG-SHA256.txt",
+            "SkillCreator-$env:TAG-manifest.json"
+          )
+          foreach ($name in $expected) {
+            if ($name -notin $names) {
+              throw "Missing release asset $name. Actual assets: $($names -join ', ')"
+            }
+          }
+          if ($names.Count -ne $expected.Count) {
             throw "Unexpected release assets: $($names -join ', ')"
           }
           Write-Output "release=$($release.url)"

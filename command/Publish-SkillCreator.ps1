@@ -1,6 +1,7 @@
 param(
     [string]$Version = "1.0.0",
     [string]$Repository = "nekobyran/skill-agentmd-creator",
+    [string]$BundleSource,
     [switch]$SkipBuild,
     [switch]$Publish,
     [switch]$Apply,
@@ -84,10 +85,26 @@ function Assert-ProjectGitRoot {
 }
 
 Assert-VersionConsistency
-$sdkRoot = Resolve-SdkRoot
-$cacheSdkRoot = if (Test-Path -LiteralPath "H:\vibecoding\sdk") { "H:\vibecoding\sdk" } else { $sdkRoot }
-$bundleSource = Join-Path $cacheSdkRoot "build-cache\skillcreator-flutter-release\runner"
-$rustBuild = Join-Path $cacheSdkRoot "build-cache\skillcreator-rust-release"
+if ($BundleSource) {
+    if (-not $SkipBuild) {
+        throw "-BundleSource 只能与 -SkipBuild 一起使用。"
+    }
+    $bundleSourcePath = if ([IO.Path]::IsPathRooted($BundleSource)) {
+        [IO.Path]::GetFullPath($BundleSource)
+    } else {
+        [IO.Path]::GetFullPath((Join-Path $projectRoot $BundleSource))
+    }
+    if (-not (Test-Path -LiteralPath $bundleSourcePath -PathType Container)) {
+        throw "指定的 portable bundle 不存在：$bundleSourcePath"
+    }
+    $cacheSdkRoot = $null
+    $rustBuild = $null
+} else {
+    $sdkRoot = Resolve-SdkRoot
+    $cacheSdkRoot = if (Test-Path -LiteralPath "H:\vibecoding\sdk") { "H:\vibecoding\sdk" } else { $sdkRoot }
+    $bundleSourcePath = Join-Path $cacheSdkRoot "build-cache\skillcreator-flutter-release\runner"
+    $rustBuild = Join-Path $cacheSdkRoot "build-cache\skillcreator-rust-release"
+}
 
 New-Item -ItemType Directory -Force -Path $releaseRoot | Out-Null
 
@@ -100,10 +117,10 @@ if (-not $SkipBuild) {
 
 Write-Host "[2/5] 验证 Flutter portable bundle"
 foreach ($required in @(
-    (Join-Path $bundleSource "skillcreator_flutter.exe"),
-    (Join-Path $bundleSource "skill_api_server.exe"),
-    (Join-Path $bundleSource "flutter_windows.dll"),
-    (Join-Path $bundleSource "data")
+    (Join-Path $bundleSourcePath "skillcreator_flutter.exe"),
+    (Join-Path $bundleSourcePath "skill_api_server.exe"),
+    (Join-Path $bundleSourcePath "flutter_windows.dll"),
+    (Join-Path $bundleSourcePath "data")
 )) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "发布 bundle 缺少文件：$required"
@@ -115,7 +132,7 @@ if (Test-Path -LiteralPath $stageRoot) {
     Remove-Item -LiteralPath $stageRoot -Recurse -Force
 }
 New-Item -ItemType Directory -Force -Path $stageRoot | Out-Null
-Copy-Item -Path (Join-Path $bundleSource '*') -Destination $stageRoot -Recurse -Force
+Copy-Item -Path (Join-Path $bundleSourcePath '*') -Destination $stageRoot -Recurse -Force
 if (Test-Path -LiteralPath $zipTarget) {
     Remove-Item -LiteralPath $zipTarget -Force
 }
@@ -192,12 +209,12 @@ if ($Publish) {
 
 if (-not $KeepBuildCache -and -not $SkipBuild) {
     foreach ($cache in @(
-                (Join-Path $cacheSdkRoot "build-cache\skillcreator-flutter-release"),
+        (Join-Path $cacheSdkRoot "build-cache\skillcreator-flutter-release"),
         $rustBuild
     )) {
         if (Test-Path -LiteralPath $cache) {
             $resolved = [IO.Path]::GetFullPath($cache)
-                        $safePrefix = [IO.Path]::GetFullPath((Join-Path $cacheSdkRoot 'build-cache')) + [IO.Path]::DirectorySeparatorChar
+            $safePrefix = [IO.Path]::GetFullPath((Join-Path $cacheSdkRoot 'build-cache')) + [IO.Path]::DirectorySeparatorChar
 
             if (-not $resolved.StartsWith($safePrefix, [StringComparison]::OrdinalIgnoreCase)) {
                 throw "拒绝清理非 SDK build-cache：$resolved"
