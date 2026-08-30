@@ -50,8 +50,9 @@ $canonicalRules = @'
 
 ## Rules
 
-1. If input is present, MUST validate it before execution.
-2. After execution, VERIFY the recorded result.
+1. Keep the execution path compact and explicit.
+2. If input is present, MUST validate it before execution.
+3. After execution, VERIFY the recorded result.
 
 ## Workflow
 Validate, execute, then verify.

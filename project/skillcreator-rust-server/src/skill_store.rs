@@ -31,6 +31,30 @@ const CODEX_API_BASE: &str = "https://chatgpt.com/backend-api/codex";
 const CODEX_MODELS_URL: &str =
     "https://chatgpt.com/backend-api/codex/models?client_version=0.144.0-alpha.4";
 const DEFAULT_CODEX_MODEL: &str = "gpt-5.3-codex-spark";
+const NORMATIVE_OUTPUT_CONTRACT: &str = concat!(
+    "\n\nNormative output contract:\n",
+    "- Treat the request as requirements regardless of whether it is written in Chinese or English.\n",
+    "- Write canonical skill content in English, except literal examples that must remain in another language.\n",
+    "- SKILL.md is a compact router only: YAML frontmatter, `## Top Rules` for universally mandatory rules, and `## Partition Index` for on-demand file routing. Do not duplicate partition details into the root.\n",
+    "- Put detailed rules, workflows, validation, platform/domain guidance, and other non-universal content in separate files. If any rule is only needed for first project execution/bootstrap/migration, place it in `references/initialization.md` and route to it only for initialization triggers.\n",
+    "- The `files` array may contain reusable UTF-8 source/templates/scripts/assets in addition to Markdown references; SKILL.md must index only what callers may need to load.\n",
+    "- In every rule-bearing partition, use fixed visible ordered-list numbers (`1.`, `2.`, `3.` ...). Preserve existing rule numbers in modify mode; never renumber unrelated rules. CLI-created rules may additionally carry SkillCreator marker comments.\n",
+        "- Treat rule text as free semantics under this normative governance contract. Preserve the requested intent, scope, modality, trigger boundaries, exclusions, ordering, and verification obligations when they exist, but do not force any particular sentence pattern or grammar.\n",
+    "- Only encode a condition, step sequence, verification/evidence clause, or other explicit structure when that structure is actually present or necessary in the requested semantics. Do not invent structure merely to make rules look uniform.\n",
+    "- Reject rule bloat: do not add rules for isolated low-probability incidents, generic prohibitions that merely restate normal assistant behavior, or defaults that need no skill-specific governance. Prefer deleting or merging such rules.\n",
+    "- Before adding a rule, check the complete bundle for semantic duplicates/overlap. Before modifying a rule, preserve stronger existing constraints and coverage unless the user explicitly requests removal.\n",
+    "- Preserve unrelated files and unknown content in modify mode. Use `deletedFiles` only for files the user explicitly asked to remove or that are provably obsolete because of the requested change.\n",
+    "- Return the complete desired UTF-8 text-file bundle, not only changed fragments."
+);
+const NORMATIVE_DESIGN_INSTRUCTIONS: &str = concat!(
+    "You are a senior Codex Skill designer. Produce a proposal only; never claim to write files, run tools, or apply changes. ",
+    "Design the skill as a compact routed multi-file package. The root SKILL.md is only the universal top-rule layer plus the partition index; detailed guidance belongs in files. ",
+        "Write every rule in the clearest free semantic form for its actual requirements. Do not prefer any sentence template; preserve explicit conditions, procedures, verification duties, scope, and modality only when the requested semantics require them, and never manufacture structure for stylistic uniformity. ",
+    "For modify mode, preserve unrelated files and stronger existing requirements, and never silently weaken or renumber existing rules. ",
+    "Every returned text file must be complete UTF-8 content. Reusable source/templates/scripts may be returned in files when they materially reduce repeated implementation work. ",
+    "Return exactly one JSON object with fields: assistantMessage (concise Chinese explanation), markdown (complete root SKILL.md), files (array of objects with path and content), and deletedFiles (array of relative paths explicitly removed by this request). ",
+    "Do not wrap the JSON in Markdown fences and do not add text outside the JSON."
+);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -667,34 +691,17 @@ pub fn design_skill_at(
         )
     };
     if normative {
-        user_content.push_str(
-            "\n\nNormative output contract:\n\
-             - Treat the request as requirements regardless of whether it is written in Chinese or English.\n\
-             - Write canonical skill content in English, except literal examples that must remain in another language.\n\
-             - SKILL.md is a compact router only: YAML frontmatter, `## Top Rules` for universally mandatory rules, and `## Partition Index` for on-demand file routing. Do not duplicate partition details into the root.\n\
-             - Put detailed rules, workflows, validation, platform/domain guidance, and other non-universal content in separate files. If any rule is only needed for first project execution/bootstrap/migration, place it in `references/initialization.md` and route to it only for initialization triggers.\n\
-             - The `files` array may contain reusable UTF-8 source/templates/scripts/assets in addition to Markdown references; SKILL.md must index only what callers may need to load.\n\
-             - In every rule-bearing partition, use fixed visible ordered-list numbers (`1.`, `2.`, `3.` ...). Preserve existing rule numbers in modify mode; never renumber unrelated rules. CLI-created rules may additionally carry SkillCreator marker comments.\n\
-             - Reject rule bloat: do not add rules for isolated low-probability incidents, generic prohibitions that merely restate normal assistant behavior, or defaults that need no skill-specific governance. Prefer deleting or merging such rules.\n\
-             - Before adding a rule, check the complete bundle for semantic duplicates/overlap. Before modifying a rule, preserve stronger existing constraints and coverage unless the user explicitly requests removal.\n\
-             - Preserve unrelated files and unknown content in modify mode. Use `deletedFiles` only for files the user explicitly asked to remove or that are provably obsolete because of the requested change.\n\
-             - Return the complete desired UTF-8 text-file bundle, not only changed fragments.",
-        );
+        user_content.push_str(NORMATIVE_OUTPUT_CONTRACT);
     }
+
     input.push(serde_json::json!({
         "role": "user",
         "content": user_content,
     }));
 
     let config = codex_translation_config(data_dir)?;
-    let instructions = concat!(
-        "You are a senior Codex Skill designer. Produce a proposal only; never claim to write files, run tools, or apply changes. ",
-        "Design the skill as a compact routed multi-file package. The root SKILL.md is only the universal top-rule layer plus the partition index; detailed guidance belongs in files. ",
-        "For modify mode, preserve unrelated files and stronger existing requirements, and never silently weaken or renumber existing rules. ",
-        "Every returned text file must be complete UTF-8 content. Reusable source/templates/scripts may be returned in files when they materially reduce repeated implementation work. ",
-        "Return exactly one JSON object with fields: assistantMessage (concise Chinese explanation), markdown (complete root SKILL.md), files (array of objects with path and content), and deletedFiles (array of relative paths explicitly removed by this request). ",
-        "Do not wrap the JSON in Markdown fences and do not add text outside the JSON."
-    );
+    let instructions = NORMATIVE_DESIGN_INSTRUCTIONS;
+
     let raw = request_codex_text(
         &config,
         instructions,
@@ -3948,6 +3955,22 @@ mod tests {
     }
 
     #[test]
+    fn normative_contract_supports_free_rule_semantics() {
+        assert!(NORMATIVE_OUTPUT_CONTRACT.contains(
+            "Treat rule text as free semantics under this normative governance contract."
+        ));
+        assert!(NORMATIVE_OUTPUT_CONTRACT
+            .contains("do not force any particular sentence pattern or grammar"));
+        assert!(NORMATIVE_OUTPUT_CONTRACT
+            .contains("Only encode a condition, step sequence, verification/evidence clause"));
+        assert!(NORMATIVE_DESIGN_INSTRUCTIONS
+            .contains("Write every rule in the clearest free semantic form"));
+        assert!(NORMATIVE_DESIGN_INSTRUCTIONS.contains("Do not prefer any sentence template"));
+        assert!(NORMATIVE_DESIGN_INSTRUCTIONS
+            .contains("never manufacture structure for stylistic uniformity"));
+    }
+
+    #[test]
     fn accepts_partitioned_english_normative_skill_contract() {
         let source = concat!(
             "---\n",
@@ -3964,8 +3987,9 @@ mod tests {
             content: concat!(
                 "# Rules\n\n",
                 "## Rules\n\n",
-                "1. If input is present, MUST validate it before execution.\n",
-                "2. After execution, VERIFY the recorded result.\n\n",
+                "1. Keep the execution path compact and explicit.\n",
+                "2. If input is present, MUST validate it before execution.\n",
+                "3. After execution, VERIFY the recorded result.\n\n",
                 "## Workflow\nValidate, execute, then verify.\n\n",
                 "## Validation\nConfirm the recorded result.\n",
             )
