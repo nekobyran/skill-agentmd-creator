@@ -369,6 +369,11 @@ try {
     }
 
     $createRequest = Get-Content -Raw -LiteralPath (Join-Path $fixtureRoot "create-request.json") -Encoding utf8 | ConvertFrom-Json
+    foreach ($legacyField in @('aliases', 'content', 'topRules', 'rules', 'commandTools')) {
+        if ($createRequest.draft.PSObject.Properties.Name -contains $legacyField) {
+            throw "canonical create draft still contains legacy field: $legacyField"
+        }
+    }
     if (@($createRequest.draft.files).Count -ne 1 -or $createRequest.draft.files[0].path -ne "rules/core.md") {
         throw "multi-file create did not send rules/core.md as draft.files"
     }

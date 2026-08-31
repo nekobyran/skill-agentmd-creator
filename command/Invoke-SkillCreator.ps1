@@ -256,11 +256,6 @@ function New-SourceDraftFromContent {
     @{
         name = $resolvedName
         description = $resolvedDescription
-        aliases = @()
-        content = ""
-        topRules = @()
-        rules = @()
-        commandTools = @()
         sourceMarkdown = $Source
         files = @($Files)
         deletedFiles = @()

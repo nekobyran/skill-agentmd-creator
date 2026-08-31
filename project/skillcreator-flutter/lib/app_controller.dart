@@ -324,11 +324,6 @@ class AppController extends ChangeNotifier {
           ? (selected?.name ?? 'untitled-skill')
           : identity.name,
       'description': identity.description,
-      'aliases': <String>[],
-      'content': '',
-      'topRules': <Object>[],
-      'rules': <Object>[],
-      'commandTools': <Object>[],
       'sourceMarkdown': source,
       'files': extraFiles,
       'deletedFiles': deleted,

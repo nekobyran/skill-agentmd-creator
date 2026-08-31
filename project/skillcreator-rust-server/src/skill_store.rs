@@ -56,133 +56,21 @@ const NORMATIVE_DESIGN_INSTRUCTIONS: &str = concat!(
 );
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SkillDraft {
     pub name: String,
     pub description: String,
-    pub aliases: Vec<String>,
-    pub content: String,
-    pub top_rules: Vec<TopRuleInput>,
-    pub rules: Vec<SkillRule>,
-    #[serde(default)]
-    pub command_tools: Vec<CommandToolInput>,
-    #[serde(default)]
-    pub source_markdown: Option<String>,
+    pub source_markdown: String,
     #[serde(default)]
     pub files: Vec<SkillFileDraft>,
     #[serde(default)]
     pub deleted_files: Vec<String>,
 }
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillFileDraft {
     pub path: String,
     pub content: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum TopRuleInput {
-    Text(String),
-    Knowledge(TopRuleKnowledge),
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TopRuleKnowledge {
-    pub name: String,
-    pub write_name: bool,
-    pub alias: String,
-    #[serde(default)]
-    pub category: String,
-    pub content: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SkillRule {
-    #[serde(default)]
-    pub name: String,
-    #[serde(default)]
-    pub category: String,
-    #[serde(default)]
-    pub trigger_conditions: Vec<RuleCondition>,
-    #[serde(default)]
-    pub limit_conditions: Vec<RuleCondition>,
-    pub routes: Vec<RuleRoute>,
-    #[serde(default)]
-    pub editor_type: String,
-    #[serde(default)]
-    pub rule_triggers: Vec<RuleTriggerInput>,
-    #[serde(default)]
-    pub rule_trigger_routes: Vec<RuleTriggerRouteInput>,
-    #[serde(default)]
-    pub rule_limit_links: Vec<RuleLimitLinkInput>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuleTriggerInput {
-    pub client_id: String,
-    pub content: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuleTriggerRouteInput {
-    pub client_id: String,
-    pub trigger_id: String,
-    pub match_mode: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuleLimitLinkInput {
-    pub content: String,
-    pub trigger_id: String,
-    pub route_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuleCondition {
-    pub alias: String,
-    pub content: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuleRoute {
-    #[serde(default)]
-    pub client_id: String,
-    pub route: String,
-    #[serde(default)]
-    pub match_mode: String,
-    #[serde(default)]
-    pub conditions: Vec<RuleCondition>,
-    pub result: RuleResult,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuleResult {
-    pub kind: String,
-    pub requirement: String,
-    pub steps: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CommandToolInput {
-    #[serde(default)]
-    pub name: String,
-    #[serde(default)]
-    pub alias: String,
-    #[serde(default)]
-    pub command: String,
-    #[serde(default)]
-    pub usage: String,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -2345,14 +2233,11 @@ fn resolve_unique_name(root: &Path, base_name: &str) -> String {
 }
 
 fn markdown_for_draft(draft: &SkillDraft, skill_name: &str) -> Result<String, String> {
-    match draft.source_markdown.as_deref() {
-        Some(source) => ensure_source_frontmatter(
-            source,
-            skill_name.trim(),
-            description_text(draft, skill_name).trim(),
-        ),
-        None => Ok(build_markdown(draft, skill_name)),
-    }
+    ensure_source_frontmatter(
+        &draft.source_markdown,
+        skill_name.trim(),
+        description_text(draft, skill_name).trim(),
+    )
 }
 
 fn ensure_source_frontmatter(
@@ -2815,271 +2700,13 @@ fn atomic_replace_file(source: &Path, destination: &Path) -> std::io::Result<()>
     }
 }
 
-fn build_markdown(draft: &SkillDraft, skill_name: &str) -> String {
-    let aliases: Vec<&str> = draft
-        .aliases
-        .iter()
-        .map(|alias| alias.trim())
-        .filter(|alias| !alias.is_empty())
-        .collect();
-    let mut output = format!(
-        "---\nname: \"{}\"\ndescription: \"{}\"\n---\n\n",
-        escape_yaml(skill_name.trim()),
-        escape_yaml(description_text(draft, skill_name).trim())
-    );
-    output.push_str(&format!("# {}\n", skill_name.trim()));
-
-    if !aliases.is_empty() {
-        output.push_str("\n## Aliases\n");
-        for alias in aliases {
-            output.push_str(&format!("- {}\n", alias));
-        }
-    }
-
-    let content = draft.content.trim();
-    if !content.is_empty() {
-        output.push_str("\n## Content\n");
-        output.push_str(content);
-        output.push('\n');
-    }
-
-    let top_rules: Vec<String> = draft.top_rules.iter().filter_map(render_top_rule).collect();
-    if !top_rules.is_empty() {
-        output.push_str("\n## 顶部规则\n");
-        for (index, rule) in top_rules.iter().enumerate() {
-            output.push_str(&format!("{}. {}\n", index + 1, rule));
-        }
-    }
-
-    let rendered_rule_groups = draft
-        .rules
-        .iter()
-        .map(|rule| render_rules(std::slice::from_ref(rule)))
-        .filter(|group| !group.is_empty())
-        .collect::<Vec<_>>();
-    if !rendered_rule_groups.is_empty() {
-        output.push_str("\n## 规则\n");
-        for (group_index, group) in rendered_rule_groups.iter().enumerate() {
-            if group_index > 0 {
-                output.push('\n');
-            }
-            for rule in group {
-                output.push_str("- ");
-                output.push_str(rule);
-                output.push('\n');
-            }
-        }
-    }
-
-    let command_tools = render_command_tools(&draft.command_tools);
-    if !command_tools.is_empty() {
-        output.push_str("\n## 纯命令工具\n");
-        for tool in command_tools {
-            output.push_str("- ");
-            output.push_str(&tool);
-            output.push('\n');
-        }
-    }
-
-    output
-}
-
-fn render_top_rule(rule: &TopRuleInput) -> Option<String> {
-    match rule {
-        TopRuleInput::Text(text) => {
-            let text = text.trim();
-            if text.is_empty() {
-                None
-            } else {
-                Some(text.to_string())
-            }
-        }
-        TopRuleInput::Knowledge(rule) => {
-            let _human_alias = rule.alias.trim();
-            let _category = rule.category.trim();
-            let content = rule.content.trim();
-            if content.is_empty() {
-                return None;
-            }
-
-            let name = rule.name.trim();
-            if rule.write_name && !name.is_empty() {
-                Some(format!("{name}: {content}"))
-            } else {
-                Some(content.to_string())
-            }
-        }
-    }
-}
-
 fn description_text(draft: &SkillDraft, skill_name: &str) -> String {
     if draft.description.trim().is_empty() {
-        let content = draft.content.trim();
-        if content.is_empty() {
-            format!("Use when the user asks for the {skill_name} skill.")
-        } else {
-            content.to_string()
-        }
+        format!("Use when the user asks for the {skill_name} skill.")
     } else {
         draft.description.trim().to_string()
     }
 }
-
-fn render_rules(rules: &[SkillRule]) -> Vec<String> {
-    let mut rendered = Vec::new();
-    for rule in rules {
-        let _name = rule.name.trim();
-        let _category = rule.category.trim();
-        if rule.editor_type == "rule" {
-            for route in &rule.rule_trigger_routes {
-                let Some(trigger) = rule
-                    .rule_triggers
-                    .iter()
-                    .find(|trigger| trigger.client_id == route.trigger_id)
-                else {
-                    continue;
-                };
-                let trigger_content = trigger.content.trim();
-                let limits = rule
-                    .rule_limit_links
-                    .iter()
-                    .filter(|limit| {
-                        limit.route_id == route.client_id && limit.trigger_id == route.trigger_id
-                    })
-                    .map(|limit| limit.content.trim())
-                    .filter(|content| !content.is_empty())
-                    .collect::<Vec<_>>();
-                if trigger_content.is_empty() || limits.is_empty() {
-                    continue;
-                }
-                let joiner = if route.match_mode == "any" {
-                    " 或者 "
-                } else {
-                    " 并且 "
-                };
-                rendered.push(format_conditional_rule(
-                    &limits.join(joiner),
-                    trigger_content,
-                ));
-            }
-            continue;
-        }
-        for route in &rule.routes {
-            let _client_id = route.client_id.trim();
-            let result = render_result(&route.result);
-            if result.is_empty() {
-                continue;
-            }
-
-            let mut clauses = Vec::new();
-            let condition_text = render_condition_text(rule);
-            if !condition_text.is_empty() {
-                clauses.push(condition_text);
-            }
-            let route_name = route.route.trim();
-            if !route_name.is_empty() {
-                clauses.push(format!("路线 {route_name}"));
-            }
-            let route_conditions = route
-                .conditions
-                .iter()
-                .map(|condition| condition.content.trim())
-                .filter(|condition| !condition.is_empty())
-                .collect::<Vec<_>>();
-            if !route_conditions.is_empty() {
-                let (mode, joiner) = if route.match_mode == "any" {
-                    ("任一条件满足", " 或者 ")
-                } else {
-                    ("全部条件满足", " 并且 ")
-                };
-                clauses.push(format!(
-                    "分支条件（{mode}） {}",
-                    route_conditions.join(joiner)
-                ));
-            }
-            if clauses.is_empty() {
-                continue;
-            }
-            rendered.push(format_conditional_rule(&clauses.join("，"), &result));
-        }
-    }
-    rendered
-}
-
-fn format_conditional_rule(condition: &str, result: &str) -> String {
-    format!("如果 {}，那么 {}", condition.trim(), result.trim())
-}
-
-fn render_command_tools(tools: &[CommandToolInput]) -> Vec<String> {
-    tools
-        .iter()
-        .filter_map(|tool| {
-            let name = first_non_empty([tool.name.trim(), tool.alias.trim(), "command-tool"]);
-            let command = tool.command.trim();
-            let usage = tool.usage.trim();
-            match (command.is_empty(), usage.is_empty()) {
-                (true, true) => None,
-                (false, false) => Some(format!("{name}: `{command}`，用途：{usage}")),
-                (false, true) => Some(format!("{name}: `{command}`")),
-                (true, false) => Some(format!("{name}: {usage}")),
-            }
-        })
-        .collect()
-}
-
-fn first_non_empty<const N: usize>(values: [&str; N]) -> &str {
-    values
-        .into_iter()
-        .find(|value| !value.is_empty())
-        .unwrap_or_default()
-}
-
-fn render_condition_text(rule: &SkillRule) -> String {
-    let trigger_conditions: Vec<&str> = rule
-        .trigger_conditions
-        .iter()
-        .map(|condition| {
-            let _alias = condition.alias.trim();
-            condition.content.trim()
-        })
-        .filter(|condition| !condition.is_empty())
-        .collect();
-    let limit_conditions: Vec<&str> = rule
-        .limit_conditions
-        .iter()
-        .map(|condition| {
-            let _alias = condition.alias.trim();
-            condition.content.trim()
-        })
-        .filter(|condition| !condition.is_empty())
-        .collect();
-
-    match (trigger_conditions.is_empty(), limit_conditions.is_empty()) {
-        (false, false) => format!(
-            "{}，限制 {}",
-            trigger_conditions.join(" 并且 "),
-            limit_conditions.join(" 并且 ")
-        ),
-        (false, true) => trigger_conditions.join(" 并且 "),
-        (true, false) => format!("限制 {}", limit_conditions.join(" 并且 ")),
-        (true, true) => String::new(),
-    }
-}
-
-fn render_result(result: &RuleResult) -> String {
-    if result.kind == "flow" {
-        result
-            .steps
-            .iter()
-            .map(|step| step.trim())
-            .filter(|step| !step.is_empty())
-            .collect::<Vec<_>>()
-            .join("→")
-    } else {
-        result.requirement.trim().to_string()
-    }
-}
-
 fn write_entry_manifest(root: &Path) -> Result<PathBuf, String> {
     fs::create_dir_all(root).map_err(|error| error.to_string())?;
     let entry_path = root.join(ENTRY_FILE_NAME);
@@ -3092,44 +2719,13 @@ fn write_entry_manifest(root: &Path) -> Result<PathBuf, String> {
         cli_hint: r#"{
   "name": "CreateSkill",
   "args": {
-
-        "name": "string",
-        "description": "string",
-    "aliases": ["string"],
-    "content": "English content",
-    "topRules": [{
-      "name": "optional rule name",
-      "writeName": true,
-      "alias": "human readable alias",
-      "category": "rule category",
-      "content": "English actual rule"
-    }],
-    "rules": [{
-      "name": "optional editor rule name",
-      "category": "local rule category",
-      "triggerConditions": [{
-        "alias": "human readable trigger",
-        "content": "English actual trigger condition"
-      }],
-      "limitConditions": [{
-        "alias": "human readable limit",
-        "content": "English actual limit condition"
-      }],
-      "routes": [{
-        "route": "string",
-        "result": {
-          "kind": "requirement|flow",
-          "requirement": "string",
-          "steps": ["string"]
-        }
-      }]
-    }],
-    "commandTools": [{
-      "name": "tool display name",
-      "alias": "human readable alias",
-      "command": "tool-name --json <args>",
-      "usage": "when and how the AI should use this command tool"
-    }]
+    "name": "string",
+    "description": "string",
+    "sourceMarkdown": "complete UTF-8 SKILL.md",
+    "files": [
+      {"path": "relative/path.md", "content": "complete UTF-8 content"}
+    ],
+    "deletedFiles": ["relative/path.md"]
   }
 }"#
         .to_string(),
@@ -3174,267 +2770,52 @@ mod tests {
         SkillDraft {
             name: name.to_string(),
             description: format!("Use when testing {name}."),
-            aliases: vec![],
-            content: String::new(),
-            top_rules: vec![],
-            rules: vec![],
-            command_tools: vec![],
-            source_markdown: Some(source.to_string()),
+            source_markdown: source.to_string(),
             files: vec![],
             deleted_files: vec![],
         }
     }
 
     #[test]
-    fn rejects_legacy_skill_rule_conditions_but_accepts_route_conditions() {
-        let legacy = serde_json::json!({
-            "conditions": ["legacy"],
-            "routes": []
+    fn accepts_only_canonical_skill_draft_fields() {
+        let canonical = serde_json::json!({
+            "name": "demo",
+            "description": "Demo",
+            "sourceMarkdown": "---\nname: demo\ndescription: Demo\n---\n",
+            "files": [],
+            "deletedFiles": []
         });
-        let error = serde_json::from_value::<SkillRule>(legacy)
-            .expect_err("legacy SkillRule.conditions should be rejected");
-        let message = error.to_string();
-        assert!(message.contains("unknown field"));
-        assert!(message.contains("conditions"));
+        let parsed = serde_json::from_value::<SkillDraft>(canonical)
+            .expect("canonical SkillDraft should deserialize");
+        assert!(parsed.source_markdown.contains("name: demo"));
 
-        let current = serde_json::json!({
-            "routes": [{
-                "route": "branch",
-                "conditions": [{"alias": "route condition", "content": "x"}],
-                "result": {"kind": "requirement", "requirement": "y", "steps": []}
-            }]
-        });
-        let parsed = serde_json::from_value::<SkillRule>(current)
-            .expect("current RuleRoute.conditions should remain supported");
-        assert_eq!(parsed.routes.len(), 1);
-        assert_eq!(parsed.routes[0].conditions.len(), 1);
-        assert_eq!(parsed.routes[0].conditions[0].content, "x");
-    }
-    #[test]
-    fn renders_compact_structured_skill() {
-        let draft = SkillDraft {
-            name: "测试 skill".to_string(),
-            description: "Compact rules".to_string(),
-            aliases: vec!["技能助手".to_string(), "スキル補助".to_string()],
-            content: "Use compact structured rules for skill design.".to_string(),
-            top_rules: vec![
-                TopRuleInput::Knowledge(TopRuleKnowledge {
-                    name: "Context".to_string(),
-                    write_name: true,
-                    alias: "先读上下文".to_string(),
-                    category: "Context".to_string(),
-                    content: "Read the available context first.".to_string(),
-                }),
-                TopRuleInput::Knowledge(TopRuleKnowledge {
-                    name: "Token economy".to_string(),
-                    write_name: false,
-                    alias: "少写废话".to_string(),
-                    category: "Output".to_string(),
-                    content: "Avoid unnecessary explanation.".to_string(),
-                }),
-            ],
-            rules: vec![SkillRule {
-                name: "Windows UI rule".to_string(),
-                category: "UI".to_string(),
-                editor_type: "route".to_string(),
-                rule_triggers: vec![],
-                rule_trigger_routes: vec![],
-                rule_limit_links: vec![],
-                trigger_conditions: vec![RuleCondition {
-                    alias: "用户要求 UI".to_string(),
-                    content: "用户要求 UI".to_string(),
-                }],
-                limit_conditions: vec![RuleCondition {
-                    alias: "目标是 Windows".to_string(),
-                    content: "目标是 Windows".to_string(),
-                }],
-                routes: vec![
-                    RuleRoute {
-                        client_id: "route-fast".to_string(),
-                        route: "快速".to_string(),
-                        match_mode: "all".to_string(),
-                        conditions: vec![],
-                        result: RuleResult {
-                            kind: "requirement".to_string(),
-                            requirement: "直接改界面".to_string(),
-                            steps: vec![],
-                        },
-                    },
-                    RuleRoute {
-                        client_id: "route-full".to_string(),
-                        route: "完整".to_string(),
-                        match_mode: "all".to_string(),
-                        conditions: vec![],
-                        result: RuleResult {
-                            kind: "flow".to_string(),
-                            requirement: String::new(),
-                            steps: vec!["分析".to_string(), "实现".to_string(), "验证".to_string()],
-                        },
-                    },
-                ],
-            }],
-            command_tools: vec![CommandToolInput {
-                name: "List Skills".to_string(),
-                alias: "列出技能".to_string(),
-                command: "skillctl list --json".to_string(),
-                usage: "Use it before editing existing skills.".to_string(),
-            }],
-            source_markdown: None,
-            files: vec![],
-            deleted_files: vec![],
-        };
-
-        let markdown = build_markdown(&draft, "test-skill");
-
-        assert!(
-            markdown.starts_with("---\nname: \"test-skill\"\ndescription: \"Compact rules\"\n---")
-        );
-        assert!(markdown.contains("description: \"Compact rules\""));
-        assert!(!markdown.contains("aliases:"));
-        assert!(markdown.contains("## Aliases\n- 技能助手\n- スキル補助"));
-        assert!(markdown.contains("## Content\nUse compact structured rules for skill design."));
-        assert!(markdown.contains("1. Context: Read the available context first."));
-        assert!(markdown.contains("2. Avoid unnecessary explanation."));
-        assert!(!markdown.contains("Token economy"));
-        assert!(!markdown.contains("少写废话"));
-        assert!(
-            markdown.contains("如果 用户要求 UI，限制 目标是 Windows，路线 快速，那么 直接改界面")
-        );
-        assert!(markdown
-            .contains("如果 用户要求 UI，限制 目标是 Windows，路线 完整，那么 分析→实现→验证"));
-        assert!(markdown.contains(
-            "List Skills: `skillctl list --json`，用途：Use it before editing existing skills."
-        ));
-        assert!(!markdown.contains("## 场景"));
+        for field in ["aliases", "content", "topRules", "rules", "commandTools"] {
+            let mut legacy = serde_json::json!({
+                "name": "demo",
+                "description": "Demo",
+                "sourceMarkdown": "---\nname: demo\ndescription: Demo\n---\n"
+            });
+            legacy
+                .as_object_mut()
+                .expect("fixture should be an object")
+                .insert(field.to_string(), serde_json::Value::Null);
+            let error = serde_json::from_value::<SkillDraft>(legacy)
+                .expect_err("legacy structured draft field should be rejected");
+            assert!(error.to_string().contains("unknown field"));
+            assert!(error.to_string().contains(field));
+        }
     }
 
     #[test]
-    fn renders_rule_trigger_routes_with_all_and_any_limits() {
-        let rule = SkillRule {
-            name: "editor-only name".to_string(),
-            category: String::new(),
-            trigger_conditions: vec![],
-            limit_conditions: vec![],
-            routes: vec![],
-            editor_type: "rule".to_string(),
-            rule_triggers: vec![RuleTriggerInput {
-                client_id: "trigger-1".to_string(),
-                content: "4".to_string(),
-            }],
-            rule_trigger_routes: vec![
-                RuleTriggerRouteInput {
-                    client_id: "route-1".to_string(),
-                    trigger_id: "trigger-1".to_string(),
-                    match_mode: "all".to_string(),
-                },
-                RuleTriggerRouteInput {
-                    client_id: "route-2".to_string(),
-                    trigger_id: "trigger-1".to_string(),
-                    match_mode: "any".to_string(),
-                },
-            ],
-            rule_limit_links: vec![
-                RuleLimitLinkInput {
-                    content: "2".to_string(),
-                    trigger_id: "trigger-1".to_string(),
-                    route_id: "route-1".to_string(),
-                },
-                RuleLimitLinkInput {
-                    content: "3".to_string(),
-                    trigger_id: "trigger-1".to_string(),
-                    route_id: "route-1".to_string(),
-                },
-                RuleLimitLinkInput {
-                    content: "5".to_string(),
-                    trigger_id: "trigger-1".to_string(),
-                    route_id: "route-2".to_string(),
-                },
-                RuleLimitLinkInput {
-                    content: "6".to_string(),
-                    trigger_id: "trigger-1".to_string(),
-                    route_id: "route-2".to_string(),
-                },
-            ],
-        };
-
-        let rendered = render_rules(&[rule]);
-        assert_eq!(
-            rendered,
-            vec!["如果 2 并且 3，那么 4", "如果 5 或者 6，那么 4"]
-        );
-        assert!(!rendered.join("\n").contains("editor-only name"));
+    fn requires_source_markdown_for_skill_drafts() {
+        let error = serde_json::from_value::<SkillDraft>(serde_json::json!({
+            "name": "demo",
+            "description": "Demo"
+        }))
+        .expect_err("sourceMarkdown should be required");
+        assert!(error.to_string().contains("missing field"));
+        assert!(error.to_string().contains("sourceMarkdown"));
     }
-
-    #[test]
-    fn separates_structured_rule_cards_with_blank_lines() {
-        let make_rule = |suffix: &str| SkillRule {
-            name: format!("name-{suffix}"),
-            category: String::new(),
-            trigger_conditions: vec![],
-            limit_conditions: vec![],
-            routes: vec![],
-            editor_type: "rule".to_string(),
-            rule_triggers: vec![RuleTriggerInput {
-                client_id: format!("t-{suffix}"),
-                content: format!("trigger-{suffix}"),
-            }],
-            rule_trigger_routes: vec![RuleTriggerRouteInput {
-                client_id: format!("r-{suffix}"),
-                trigger_id: format!("t-{suffix}"),
-                match_mode: "all".to_string(),
-            }],
-            rule_limit_links: vec![RuleLimitLinkInput {
-                content: format!("limit-{suffix}"),
-                trigger_id: format!("t-{suffix}"),
-                route_id: format!("r-{suffix}"),
-            }],
-        };
-        let draft = SkillDraft {
-            name: "group-test".to_string(),
-            description: "group test".to_string(),
-            aliases: vec![],
-            content: String::new(),
-            top_rules: vec![],
-            rules: vec![make_rule("1"), make_rule("2")],
-            command_tools: vec![],
-            source_markdown: None,
-            files: vec![],
-            deleted_files: vec![],
-        };
-
-        let markdown = build_markdown(&draft, "group-test");
-        assert!(
-            markdown.contains("- 如果 limit-1，那么 trigger-1\n\n- 如果 limit-2，那么 trigger-2")
-        );
-    }
-
-    #[test]
-    fn renders_empty_named_skill() {
-        let draft = SkillDraft {
-            name: "empty-skill".to_string(),
-            description: String::new(),
-            aliases: vec![],
-            content: String::new(),
-            top_rules: vec![],
-            rules: vec![],
-            command_tools: vec![],
-            source_markdown: None,
-            files: vec![],
-            deleted_files: vec![],
-        };
-
-        let markdown = build_markdown(&draft, "empty-skill");
-
-        assert!(markdown.contains("name: \"empty-skill\""));
-        assert!(
-            markdown.contains("description: \"Use when the user asks for the empty-skill skill.\"")
-        );
-        assert!(markdown.contains("# empty-skill"));
-        assert!(!markdown.contains("## 顶部规则"));
-        assert!(!markdown.contains("## 规则"));
-        assert!(!markdown.contains("## 纯命令工具"));
-    }
-
     #[test]
     fn normalizes_skill_names_to_skill_folder_format() {
         assert_eq!(make_safe_file_name("Plan Mode"), "plan-mode");
@@ -3461,12 +2842,7 @@ mod tests {
         let draft = SkillDraft {
             name: "edited-name".to_string(),
             description: "Edited description".to_string(),
-            aliases: vec![],
-            content: String::new(),
-            top_rules: vec![],
-            rules: vec![],
-            command_tools: vec![],
-            source_markdown: Some(source.to_string()),
+            source_markdown: source.to_string(),
             files: vec![],
             deleted_files: vec![],
         };
@@ -3487,12 +2863,7 @@ mod tests {
         let draft = SkillDraft {
             name: "new-skill".to_string(),
             description: "New description".to_string(),
-            aliases: vec![],
-            content: String::new(),
-            top_rules: vec![],
-            rules: vec![],
-            command_tools: vec![],
-            source_markdown: Some(source.to_string()),
+            source_markdown: source.to_string(),
             files: vec![],
             deleted_files: vec![],
         };
@@ -3520,12 +2891,7 @@ mod tests {
         let draft = SkillDraft {
             name: "new-name".to_string(),
             description: "New description".to_string(),
-            aliases: vec![],
-            content: String::new(),
-            top_rules: vec![],
-            rules: vec![],
-            command_tools: vec![],
-            source_markdown: Some(source.to_string()),
+            source_markdown: source.to_string(),
             files: vec![],
             deleted_files: vec![],
         };
@@ -3551,12 +2917,7 @@ mod tests {
         let draft = SkillDraft {
             name: "safe-name".to_string(),
             description: "Safe description".to_string(),
-            aliases: vec![],
-            content: String::new(),
-            top_rules: vec![],
-            rules: vec![],
-            command_tools: vec![],
-            source_markdown: Some(source.to_string()),
+            source_markdown: source.to_string(),
             files: vec![],
             deleted_files: vec![],
         };
@@ -3672,58 +3033,6 @@ mod tests {
 
         assert_eq!(proposal.assistant_message, "已生成提案");
         assert!(proposal.markdown.contains("## Custom\nKeep me."));
-    }
-
-    #[test]
-    fn renders_route_specific_conditions_for_branching_flows() {
-        let rule = SkillRule {
-            name: "branch-flow".to_string(),
-            category: "routing".to_string(),
-            trigger_conditions: vec![],
-            limit_conditions: vec![],
-            routes: vec![
-                RuleRoute {
-                    client_id: "route-if4".to_string(),
-                    route: "route-3".to_string(),
-                    match_mode: "all".to_string(),
-                    conditions: vec![RuleCondition {
-                        alias: "if4".to_string(),
-                        content: "4".to_string(),
-                    }],
-                    result: RuleResult {
-                        kind: "flow".to_string(),
-                        requirement: String::new(),
-                        steps: vec!["1".to_string(), "2".to_string(), "3".to_string()],
-                    },
-                },
-                RuleRoute {
-                    client_id: "route-if6".to_string(),
-                    route: "route-4".to_string(),
-                    match_mode: "any".to_string(),
-                    conditions: vec![RuleCondition {
-                        alias: "if6".to_string(),
-                        content: "6".to_string(),
-                    }],
-                    result: RuleResult {
-                        kind: "flow".to_string(),
-                        requirement: String::new(),
-                        steps: vec!["1".to_string(), "2".to_string(), "4".to_string()],
-                    },
-                },
-            ],
-            editor_type: "route".to_string(),
-            rule_triggers: vec![],
-            rule_trigger_routes: vec![],
-            rule_limit_links: vec![],
-        };
-
-        assert_eq!(
-            render_rules(&[rule]),
-            vec![
-                "如果 路线 route-3，分支条件（全部条件满足） 4，那么 1→2→3",
-                "如果 路线 route-4，分支条件（任一条件满足） 6，那么 1→2→4",
-            ]
-        );
     }
 
     #[test]
