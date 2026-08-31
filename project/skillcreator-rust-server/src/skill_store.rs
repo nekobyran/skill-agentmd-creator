@@ -9,7 +9,7 @@ use std::{
 };
 
 pub const SKILL_FILE_NAME: &str = "SKILL.md";
-pub const ENTRY_FILE_NAME: &str = "agent-entry.json";
+pub const ENTRY_FILE_NAME: &str = "skillcreator-entry.json";
 #[allow(dead_code)]
 pub const API_HOST: &str = "127.0.0.1";
 #[allow(dead_code)]
@@ -2775,6 +2775,9 @@ mod tests {
         ));
         fs::create_dir_all(&root).expect("test directory should be created");
         ensure_manifest_at(&root).expect("entry manifest should be written");
+        assert_eq!(ENTRY_FILE_NAME, "skillcreator-entry.json");
+        assert!(root.join(ENTRY_FILE_NAME).is_file());
+        assert!(!root.join("agent-entry.json").exists());
         let content = fs::read_to_string(root.join(ENTRY_FILE_NAME))
             .expect("entry manifest should be readable");
         let manifest: serde_json::Value =
