@@ -154,8 +154,6 @@ class CodexSkillEntry {
     required this.importedId,
     required this.editorChain,
     required this.formatGaps,
-    required this.normalizedRuleCount,
-    required this.legacyRuleCount,
     required this.loadable,
   });
   final String id;
@@ -170,8 +168,6 @@ class CodexSkillEntry {
   final String? importedId;
   final String editorChain;
   final List<String> formatGaps;
-  final int normalizedRuleCount;
-  final int legacyRuleCount;
   final bool loadable;
   factory CodexSkillEntry.fromJson(Map<String, dynamic> json) =>
       CodexSkillEntry(
@@ -189,9 +185,6 @@ class CodexSkillEntry {
         formatGaps: ((json['formatGaps'] as List?) ?? const [])
             .whereType<String>()
             .toList(),
-        normalizedRuleCount:
-            (json['normalizedRuleCount'] as num?)?.toInt() ?? 0,
-        legacyRuleCount: (json['legacyRuleCount'] as num?)?.toInt() ?? 0,
         loadable: json['loadable'] as bool? ?? false,
       );
 }

@@ -234,8 +234,6 @@ pub struct CodexSkillCatalogEntry {
     pub imported_id: Option<String>,
     pub editor_chain: String,
     pub format_gaps: Vec<String>,
-    pub normalized_rule_count: usize,
-    pub legacy_rule_count: usize,
     pub loadable: bool,
 }
 
@@ -1420,8 +1418,6 @@ pub fn scan_codex_skills_at(workspace_root: &Path) -> Result<CodexSkillCatalog, 
             imported_id,
             editor_chain: compatibility.editor_chain,
             format_gaps: compatibility.format_gaps,
-            normalized_rule_count: compatibility.normalized_rule_count,
-            legacy_rule_count: compatibility.legacy_rule_count,
             loadable: compatibility.loadable,
         });
     }
@@ -1443,8 +1439,6 @@ pub fn scan_codex_skills_at(workspace_root: &Path) -> Result<CodexSkillCatalog, 
 struct EditorCompatibility {
     editor_chain: String,
     format_gaps: Vec<String>,
-    normalized_rule_count: usize,
-    legacy_rule_count: usize,
     loadable: bool,
 }
 
@@ -1468,27 +1462,8 @@ fn analyze_editor_compatibility(content: &str, loadable: bool) -> EditorCompatib
         format_gaps.push("缺少标准“规则”章节".to_string());
     }
 
-    let mut normalized_rule_count = 0;
-    let mut legacy_rule_count = 0;
-    for line in content.lines() {
-        let value = strip_markdown_list_marker(line.trim());
-        let lower = value.to_ascii_lowercase();
-        if (value.starts_with("如果 ") && value.contains("那么 "))
-            || (lower.starts_with("if ") && lower.contains(" then "))
-        {
-            normalized_rule_count += 1;
-        } else if value.starts_with("若 ") && value.contains(" 则 ") {
-            legacy_rule_count += 1;
-        }
-    }
-    if legacy_rule_count > 0 {
-        format_gaps.push("存在“若/则”旧逻辑句，可规范化为“如果/那么”".to_string());
-    }
-
     let editor_chain = if !loadable {
         "source-repair"
-    } else if has_rule_section && normalized_rule_count + legacy_rule_count > 0 {
-        "structured-logic"
     } else if has_section {
         "structured-sections"
     } else {
@@ -1498,33 +1473,8 @@ fn analyze_editor_compatibility(content: &str, loadable: bool) -> EditorCompatib
     EditorCompatibility {
         editor_chain: editor_chain.to_string(),
         format_gaps,
-        normalized_rule_count,
-        legacy_rule_count,
         loadable,
     }
-}
-
-fn strip_markdown_list_marker(line: &str) -> &str {
-    let trimmed = line.trim_start();
-    if let Some(rest) = trimmed
-        .strip_prefix("- ")
-        .or_else(|| trimmed.strip_prefix("* "))
-        .or_else(|| trimmed.strip_prefix("+ "))
-    {
-        return rest.trim_start();
-    }
-
-    let digit_count = trimmed
-        .chars()
-        .take_while(|character| character.is_ascii_digit())
-        .count();
-    if digit_count > 0 {
-        let rest = &trimmed[digit_count..];
-        if let Some(rest) = rest.strip_prefix(". ").or_else(|| rest.strip_prefix("、")) {
-            return rest.trim_start();
-        }
-    }
-    trimmed
 }
 
 pub fn import_codex_skills_at(
@@ -3808,8 +3758,6 @@ mod tests {
             imported_id: None,
             editor_chain: "lossless-isomorphic".to_string(),
             format_gaps: Vec::new(),
-            normalized_rule_count: 0,
-            legacy_rule_count: 0,
             loadable: true,
         };
 
@@ -3825,13 +3773,12 @@ mod tests {
     }
 
     #[test]
-    fn classifies_standard_and_lossless_editor_chains() {
+    fn classifies_structured_and_lossless_editor_chains() {
         let standard = analyze_editor_compatibility(
-            "---\nname: demo\ndescription: Demo\n---\n\n## 规则\n- 如果 1，那么 2\n",
+            "---\nname: demo\ndescription: Demo\n---\n\n## 规则\n- Keep the requested semantics intact.\n",
             true,
         );
-        assert_eq!(standard.editor_chain, "structured-logic");
-        assert_eq!(standard.normalized_rule_count, 1);
+        assert_eq!(standard.editor_chain, "structured-sections");
         assert!(standard.format_gaps.is_empty());
 
         let arbitrary = analyze_editor_compatibility(
@@ -3851,17 +3798,17 @@ mod tests {
     }
 
     #[test]
-    fn reports_legacy_logic_as_normalizable() {
-        let compatibility = analyze_editor_compatibility(
-            "---\nname: demo\ndescription: Demo\n---\n\n## 规则\n- 若 1 则 2\n",
-            true,
-        );
-        assert_eq!(compatibility.editor_chain, "structured-logic");
-        assert_eq!(compatibility.legacy_rule_count, 1);
-        assert!(compatibility
-            .format_gaps
-            .iter()
-            .any(|gap| gap.contains("若/则")));
+    fn treats_rule_wording_as_free_semantics() {
+        for rule in [
+            "如果 1，那么 2",
+            "若 1 则 2",
+            "Preserve the direct requirement.",
+        ] {
+            let content = format!("---\nname: demo\ndescription: Demo\n---\n\n## 规则\n- {rule}\n");
+            let compatibility = analyze_editor_compatibility(&content, true);
+            assert_eq!(compatibility.editor_chain, "structured-sections");
+            assert!(compatibility.format_gaps.is_empty());
+        }
     }
 
     #[test]

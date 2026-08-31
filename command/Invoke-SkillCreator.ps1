@@ -920,7 +920,6 @@ switch ($Action) {
     "audit" {
         $catalog = Invoke-Api -Method GET -Path "/codex_skills"
         $chainCounts = [ordered]@{
-            structuredLogic = @($catalog.entries | Where-Object editorChain -eq "structured-logic").Count
             structuredSections = @($catalog.entries | Where-Object editorChain -eq "structured-sections").Count
             losslessIsomorphic = @($catalog.entries | Where-Object editorChain -eq "lossless-isomorphic").Count
             sourceRepair = @($catalog.entries | Where-Object editorChain -eq "source-repair").Count
@@ -944,8 +943,6 @@ switch ($Action) {
                     editorChain = $_.editorChain
                     loadable = $_.loadable
                     formatGaps = @($_.formatGaps)
-                    normalizedRuleCount = $_.normalizedRuleCount
-                    legacyRuleCount = $_.legacyRuleCount
                     imported = $_.imported
                     importedId = $_.importedId
                 }
