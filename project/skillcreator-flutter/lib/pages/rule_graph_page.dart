@@ -168,6 +168,7 @@ class _GraphNodeCard extends StatelessWidget {
     final fill = switch (node.kind) {
       _NodeKind.skill => scheme.primaryContainer,
       _NodeKind.file => scheme.secondaryContainer,
+      _NodeKind.rule => scheme.surfaceContainerHigh,
       _NodeKind.condition => scheme.tertiaryContainer,
       _NodeKind.cause => scheme.surfaceContainerHighest,
       _NodeKind.result => scheme.errorContainer,
@@ -267,7 +268,7 @@ class _Inspector extends StatelessWidget {
   }
 }
 
-enum _NodeKind { skill, file, condition, cause, result }
+enum _NodeKind { skill, file, rule, condition, cause, result }
 
 class _GraphNode {
   const _GraphNode({
@@ -329,8 +330,9 @@ class _GraphLayout {
           0,
           (sum, rule) =>
               sum +
-              (rule.conditions.isEmpty ? 1 : rule.conditions.length) +
-              (rule.cause.isEmpty ? 1 : 2),
+              (rule.freeText.trim().isNotEmpty
+                  ? 1
+                  : math.max(1, rule.conditions.length)),
         ),
       );
       final fileStartY = y;
@@ -339,7 +341,7 @@ class _GraphLayout {
         id: fileNodeId,
         kind: _NodeKind.file,
         title: file.path,
-        detail: rules.isEmpty ? '无拼图规则' : '${rules.length} 条拼图规则',
+        detail: rules.isEmpty ? '无规则' : '${rules.length} 条规则',
         eyebrow: file.isEntry ? '入口文件' : '规则文件',
         rect: Rect.fromLTWH(300, fileStartY, nodeW, nodeH),
       );
@@ -351,15 +353,32 @@ class _GraphLayout {
       }
       for (var ruleIndex = 0; ruleIndex < rules.length; ruleIndex++) {
         final rule = rules[ruleIndex];
+        final freeText = rule.freeText.trim();
+        if (freeText.isNotEmpty) {
+          final ruleId = 'rule-$fileIndex-$ruleIndex';
+          nodes.add(
+            _GraphNode(
+              id: ruleId,
+              kind: _NodeKind.rule,
+              title: freeText,
+              detail: '自由语义',
+              eyebrow: '规则',
+              rect: Rect.fromLTWH(560, y, nodeW, nodeH),
+            ),
+          );
+          edges.add(_GraphEdge(fileNodeId, ruleId, '规则 ${ruleIndex + 1}'));
+          y += nodeH + gapY;
+          maxX = math.max(maxX, 560 + nodeW + pad);
+          continue;
+        }
+
         final conditionIds = <String>[];
         for (
           var conditionIndex = 0;
-          conditionIndex < math.max(1, rule.conditions.length);
+          conditionIndex < rule.conditions.length;
           conditionIndex++
         ) {
-          final condition = conditionIndex < rule.conditions.length
-              ? rule.conditions[conditionIndex]
-              : '未填写条件';
+          final condition = rule.conditions[conditionIndex];
           final id = 'condition-$fileIndex-$ruleIndex-$conditionIndex';
           nodes.add(
             _GraphNode(
@@ -384,9 +403,12 @@ class _GraphLayout {
           );
           y += nodeH + gapY;
         }
-        String source = conditionIds.last;
+
+        var source = conditionIds.isEmpty ? fileNodeId : conditionIds.last;
+        final rowY = conditionIds.isEmpty ? y : y - nodeH - gapY;
         if (rule.cause.isNotEmpty) {
           final causeId = 'cause-$fileIndex-$ruleIndex';
+          final causeX = conditionIds.isEmpty ? 560.0 : 820.0;
           nodes.add(
             _GraphNode(
               id: causeId,
@@ -394,26 +416,42 @@ class _GraphLayout {
               title: rule.cause,
               detail: 'BECAUSE',
               eyebrow: '因为',
-              rect: Rect.fromLTWH(820, y - nodeH - gapY, nodeW, nodeH),
+              rect: Rect.fromLTWH(causeX, rowY, nodeW, nodeH),
             ),
           );
           edges.add(_GraphEdge(source, causeId, '因为'));
           source = causeId;
-          maxX = math.max(maxX, 1070);
+          maxX = math.max(maxX, causeX + nodeW + pad);
         }
+
         final resultId = 'result-$fileIndex-$ruleIndex';
-        final resultX = rule.cause.isNotEmpty ? 1080.0 : 820.0;
+        final resultX = rule.cause.isNotEmpty
+            ? (conditionIds.isEmpty ? 820.0 : 1080.0)
+            : (conditionIds.isEmpty ? 560.0 : 820.0);
         nodes.add(
           _GraphNode(
             id: resultId,
-            kind: _NodeKind.result,
+            kind: conditionIds.isEmpty && rule.cause.isEmpty
+                ? _NodeKind.rule
+                : _NodeKind.result,
             title: rule.result.isEmpty ? '未填写结果' : rule.result,
             detail: rule.verb,
-            eyebrow: '结果',
-            rect: Rect.fromLTWH(resultX, y - nodeH - gapY, nodeW, nodeH),
+            eyebrow: conditionIds.isEmpty && rule.cause.isEmpty ? '规则' : '结果',
+            rect: Rect.fromLTWH(resultX, rowY, nodeW, nodeH),
           ),
         );
-        edges.add(_GraphEdge(source, resultId, '=> ${rule.verb}'));
+        edges.add(
+          _GraphEdge(
+            source,
+            resultId,
+            conditionIds.isEmpty && rule.cause.isEmpty
+                ? '规则 ${ruleIndex + 1}'
+                : '=> ${rule.verb}',
+          ),
+        );
+        if (conditionIds.isEmpty) {
+          y += nodeH + gapY;
+        }
         maxX = math.max(maxX, resultX + nodeW + pad);
       }
       y = math.max(y, fileStartY + blockRows * (nodeH + gapY));

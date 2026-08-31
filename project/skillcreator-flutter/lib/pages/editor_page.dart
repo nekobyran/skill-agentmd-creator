@@ -99,7 +99,7 @@ class _EditorPageState extends State<EditorPage> {
                     c.updateActiveSource(value);
                   },
                 )
-              : _PuzzleEditor(controller: c),
+              : _RulesEditor(controller: c),
         ),
       ],
     );
@@ -507,17 +507,17 @@ class _SourceEditor extends StatelessWidget {
   }
 }
 
-class _PuzzleEditor extends StatefulWidget {
-  const _PuzzleEditor({required this.controller});
+class _RulesEditor extends StatefulWidget {
+  const _RulesEditor({required this.controller});
   final AppController controller;
   @override
-  State<_PuzzleEditor> createState() => _PuzzleEditorState();
+  State<_RulesEditor> createState() => _RulesEditorState();
 }
 
-class _PuzzleEditorState extends State<_PuzzleEditor> {
-  late List<PuzzleRule> rules;
+class _RulesEditorState extends State<_RulesEditor> {
   late TextEditingController name;
   late TextEditingController description;
+  late TextEditingController rulesBody;
   String sourceSignature = '';
 
   @override
@@ -527,7 +527,7 @@ class _PuzzleEditorState extends State<_PuzzleEditor> {
   }
 
   @override
-  void didUpdateWidget(covariant _PuzzleEditor oldWidget) {
+  void didUpdateWidget(covariant _RulesEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
     final signature =
         '${widget.controller.selected?.id}:${widget.controller.activeSource.hashCode}';
@@ -543,6 +543,7 @@ class _PuzzleEditorState extends State<_PuzzleEditor> {
     if (sourceSignature.isNotEmpty) {
       name.dispose();
       description.dispose();
+      rulesBody.dispose();
     }
     name = TextEditingController(
       text: identity.name.isEmpty
@@ -554,20 +555,26 @@ class _PuzzleEditorState extends State<_PuzzleEditor> {
           ? widget.controller.selected?.description ?? ''
           : identity.description,
     );
-    rules = SkillMarkdown.parseRules(source);
+    rulesBody = TextEditingController(
+      text: SkillMarkdown.rulesSectionBody(source),
+    );
     sourceSignature = '${widget.controller.selected?.id}:${source.hashCode}';
   }
 
-  void _commitRules() {
-    widget.controller.updateActiveSource(
-      SkillMarkdown.serializeRules(widget.controller.activeSource, rules),
+  void _commitRules(String value) {
+    final source = SkillMarkdown.replaceRulesSection(
+      widget.controller.activeSource,
+      value,
     );
+    sourceSignature = '${widget.controller.selected?.id}:${source.hashCode}';
+    widget.controller.updateActiveSource(source);
   }
 
   @override
   void dispose() {
     name.dispose();
     description.dispose();
+    rulesBody.dispose();
     super.dispose();
   }
 
@@ -618,252 +625,26 @@ class _PuzzleEditorState extends State<_PuzzleEditor> {
           ],
         ),
         const SizedBox(height: 22),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                '因果与条件关系',
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-            ),
-            FilledButton.tonalIcon(
-              onPressed: () => setState(
-                () => rules.add(PuzzleRule(conditions: [''], result: '')),
-              ),
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('新增规则'),
-            ),
-          ],
+        Text('Rules 章节', style: Theme.of(context).textTheme.labelLarge),
+        const SizedBox(height: 6),
+        Text(
+          '直接编辑规则的自由语义文本；不要求条件、因果或固定句式。只有规则本身明确需要时才写条件、步骤、验证或约束。',
+          style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 10),
-        if (rules.isEmpty)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Text(
-                '暂无可视化规则。新增一条，或在源码模式中使用 `[属性] ALL(条件) => MUST 结果`。',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-            ),
-          )
-        else
-          for (var i = 0; i < rules.length; i++) ...[
-            _RuleCard(
-              key: ValueKey('rule-$i-${rules[i].hashCode}'),
-              rule: rules[i],
-              index: i,
-              onChanged: _commitRules,
-              onRemove: () {
-                setState(() => rules.removeAt(i));
-                _commitRules();
-              },
-            ),
-            const SizedBox(height: 10),
-          ],
-      ],
-    );
-  }
-}
-
-class _RuleCard extends StatefulWidget {
-  const _RuleCard({
-    super.key,
-    required this.rule,
-    required this.index,
-    required this.onChanged,
-    required this.onRemove,
-  });
-  final PuzzleRule rule;
-  final int index;
-  final VoidCallback onChanged;
-  final VoidCallback onRemove;
-  @override
-  State<_RuleCard> createState() => _RuleCardState();
-}
-
-class _RuleCardState extends State<_RuleCard> {
-  late TextEditingController properties;
-  late List<TextEditingController> conditions;
-  late TextEditingController cause;
-  late TextEditingController result;
-
-  @override
-  void initState() {
-    super.initState();
-    properties = TextEditingController(text: widget.rule.properties.join(', '));
-    conditions =
-        (widget.rule.conditions.isEmpty ? <String>[''] : widget.rule.conditions)
-            .map((text) => TextEditingController(text: text))
-            .toList();
-    cause = TextEditingController(text: widget.rule.cause);
-    result = TextEditingController(text: widget.rule.result);
-  }
-
-  void commit() {
-    widget.rule.properties = properties.text
-        .split(',')
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toList();
-    widget.rule.conditions = conditions
-        .map((e) => e.text.trim())
-        .where((e) => e.isNotEmpty)
-        .toList();
-    widget.rule.cause = cause.text.trim();
-    widget.rule.result = result.text.trim();
-    widget.onChanged();
-  }
-
-  @override
-  void dispose() {
-    properties.dispose();
-    for (final c in conditions) {
-      c.dispose();
-    }
-    cause.dispose();
-    result.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Text(
-                  '规则 ${widget.index + 1}',
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: properties,
-                    decoration: const InputDecoration(labelText: '属性，用逗号分隔'),
-                    onChanged: (_) => commit(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(value: 'ALL', label: Text('ALL')),
-                    ButtonSegment(value: 'ANY', label: Text('ANY')),
-                  ],
-                  selected: {widget.rule.matchMode},
-                  showSelectedIcon: false,
-                  onSelectionChanged: (value) {
-                    setState(() => widget.rule.matchMode = value.first);
-                    commit();
-                  },
-                ),
-                IconButton(
-                  tooltip: '删除规则',
-                  onPressed: widget.onRemove,
-                  icon: const Icon(Icons.delete_outline_rounded),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            for (var i = 0; i < conditions.length; i++)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 7),
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 72,
-                      child: Text(
-                        i == 0
-                            ? '如果'
-                            : (widget.rule.matchMode == 'ANY' ? '或者' : '并且'),
-                      ),
-                    ),
-                    Expanded(
-                      child: TextField(
-                        controller: conditions[i],
-                        decoration: InputDecoration(hintText: '条件 ${i + 1}'),
-                        onChanged: (_) => commit(),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: '移除条件',
-                      onPressed: conditions.length <= 1
-                          ? null
-                          : () {
-                              setState(() => conditions.removeAt(i).dispose());
-                              commit();
-                            },
-                      icon: const Icon(Icons.remove_circle_outline_rounded),
-                    ),
-                  ],
-                ),
-              ),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: () =>
-                    setState(() => conditions.add(TextEditingController())),
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('增加条件'),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const SizedBox(width: 72, child: Text('因为')),
-                Expanded(
-                  child: TextField(
-                    controller: cause,
-                    decoration: const InputDecoration(hintText: '可选因果说明'),
-                    onChanged: (_) => commit(),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                const SizedBox(width: 72, child: Text('结果')),
-                DropdownButton<String>(
-                  value: widget.rule.verb,
-                  items:
-                      const [
-                            'MUST',
-                            'USE',
-                            'EMIT',
-                            'RETURN',
-                            'VERIFY',
-                            'SKIP',
-                            'AVOID',
-                          ]
-                          .map(
-                            (value) => DropdownMenuItem(
-                              value: value,
-                              child: Text(value),
-                            ),
-                          )
-                          .toList(),
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setState(() => widget.rule.verb = value);
-                    commit();
-                  },
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: result,
-                    decoration: const InputDecoration(hintText: '结果化词汇'),
-                    onChanged: (_) => commit(),
-                  ),
-                ),
-              ],
-            ),
-          ],
+        TextField(
+          controller: rulesBody,
+          minLines: 12,
+          maxLines: null,
+          keyboardType: TextInputType.multiline,
+          decoration: const InputDecoration(
+            hintText:
+                '1. Preserve the exact requirement.\n2. Verify the requested outcome when verification is required.',
+            alignLabelWithHint: true,
+          ),
+          onChanged: _commitRules,
         ),
-      ),
+      ],
     );
   }
 }

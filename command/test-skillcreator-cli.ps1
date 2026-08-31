@@ -284,7 +284,7 @@ try {
     )
     [IO.File]::WriteAllText(
         (Join-Path $bundleRuleDirectory "core.md"),
-        "# Core`n`n## Rules`n- [scope=cli] ALL(bundle requested) => MUST load only this block`n",
+        "# Core`n`n## Rules`n`n1. Load only this block when the bundle is requested.`n",
         [Text.UTF8Encoding]::new($false)
     )
     $bundleCreate = & $cli `

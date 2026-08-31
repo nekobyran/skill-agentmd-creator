@@ -24,6 +24,67 @@ void main() {
     expect(SkillMarkdown.normalizeMarkdownPath('assets/helper.ps1'), isNull);
   });
 
+  test(
+    'rules section editor preserves free semantics and unrelated sections',
+    () {
+      const source = '''---
+name: sample
+description: sample
+---
+
+## Rules
+
+1. Preserve the exact requirement.
+2. Verify only when the requirement asks for evidence.
+
+```markdown
+## Not A Section
+Keep this fenced content.
+```
+
+## Validation
+
+Keep validation unchanged.
+''';
+
+      final body = SkillMarkdown.rulesSectionBody(source);
+      expect(body, contains('1. Preserve the exact requirement.'));
+      expect(body, contains('## Not A Section'));
+
+      final next = SkillMarkdown.replaceRulesSection(
+        source,
+        '1. Preserve free semantics.\n2. Add conditions only when required.',
+      );
+
+      expect(next, contains('## Rules\n\n1. Preserve free semantics.'));
+      expect(next, contains('2. Add conditions only when required.'));
+      expect(next, contains('## Validation\n\nKeep validation unchanged.'));
+      expect(next, isNot(contains('ALL(')));
+      expect(next, isNot(contains('=> MUST')));
+    },
+  );
+
+  test('rule parser distinguishes free semantic and explicit conditions', () {
+    const source = '''## Rules
+
+1. Preserve the direct requirement.
+- 如果 input is missing，那么 request it explicitly
+
+```text
+3. This fenced example is not a rule.
+```
+''';
+
+    final rules = SkillMarkdown.parseRules(source);
+    expect(rules, hasLength(2));
+
+    expect(rules[0].freeText, 'Preserve the direct requirement.');
+    expect(rules[0].conditions, isEmpty);
+    expect(rules[1].freeText, isEmpty);
+    expect(rules[1].conditions, ['input is missing']);
+    expect(rules[1].result, 'request it explicitly');
+  });
+
   test('section editor ignores headings inside fenced code blocks', () {
     const source = '''---
 name: sample

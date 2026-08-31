@@ -3086,7 +3086,7 @@ fn write_entry_manifest(root: &Path) -> Result<PathBuf, String> {
     let payload = EntryManifest {
         tool: "skill-agentmd-creator".to_string(),
         version: "2.0".to_string(),
-                description: "结构化创建标准 Codex Skill：生成 skill-name/SKILL.md，顶部规则自动编号，条件规则自动压缩为 如果/那么，流程结果自动用箭头连接。".to_string(),
+        description: "规范化创建标准 Codex Skill：生成 skill-name/SKILL.md，保留规则自由语义，仅在语义明确需要时编码条件、流程与验证结构。".to_string(),
         entry_root: root.to_string_lossy().to_string(),
         supported_files: vec![SKILL_FILE_NAME.to_string()],
         cli_hint: r#"{

@@ -1,11 +1,12 @@
-class PuzzleRule {
-  PuzzleRule({
+class ParsedRule {
+  ParsedRule({
     List<String>? properties,
     this.matchMode = 'ALL',
     List<String>? conditions,
     this.cause = '',
     this.verb = 'MUST',
     this.result = '',
+    this.freeText = '',
   }) : properties = properties ?? <String>[],
        conditions = conditions ?? <String>[];
   List<String> properties;
@@ -14,14 +15,16 @@ class PuzzleRule {
   String cause;
   String verb;
   String result;
+  String freeText;
 
-  PuzzleRule copy() => PuzzleRule(
+  ParsedRule copy() => ParsedRule(
     properties: List.of(properties),
     matchMode: matchMode,
     conditions: List.of(conditions),
     cause: cause,
     verb: verb,
     result: result,
+    freeText: freeText,
   );
 }
 
@@ -132,17 +135,36 @@ class SkillMarkdown {
     return '$frontmatter\n\n${source.trimLeft()}';
   }
 
-  static List<PuzzleRule> parseRules(String source) {
-    final section =
-        sectionBody(source, 'Rules') ?? sectionBody(source, '规则') ?? '';
-    final rules = <PuzzleRule>[];
+  static List<ParsedRule> parseRules(String source) {
+    final section = rulesSectionBody(source);
+    final rules = <ParsedRule>[];
+    var inFence = false;
+    var fenceCharacter = '';
+    var fenceLength = 0;
     for (final raw in section.split(RegExp(r'\r?\n'))) {
+      final fence = RegExp(r'^\s*(`{3,}|~{3,})').firstMatch(raw);
+      if (fence != null) {
+        final marker = fence.group(1)!;
+        if (!inFence) {
+          inFence = true;
+          fenceCharacter = marker[0];
+          fenceLength = marker.length;
+        } else if (marker[0] == fenceCharacter &&
+            marker.length >= fenceLength) {
+          inFence = false;
+          fenceCharacter = '';
+          fenceLength = 0;
+        }
+        continue;
+      }
+      if (inFence) continue;
+
       final line = raw.trim();
       if (line.isEmpty) continue;
       final match = _rulePattern.firstMatch(line);
       if (match != null) {
         rules.add(
-          PuzzleRule(
+          ParsedRule(
             properties: _splitEscaped(match.group(1) ?? '', ','),
             matchMode: (match.group(2) ?? 'ALL').toUpperCase(),
             conditions: _splitEscaped(
@@ -161,58 +183,45 @@ class SkillMarkdown {
       ).firstMatch(line);
       if (chinese != null) {
         rules.add(
-          PuzzleRule(
+          ParsedRule(
             conditions: [chinese.group(1)!.trim()],
             result: chinese.group(2)!.trim(),
           ),
         );
+        continue;
+      }
+      final plain = RegExp(r'^(?:[-*+]\s+|\d+[.)、]\s+)(.+)$').firstMatch(line);
+      if (plain != null && plain.group(1)!.trim().isNotEmpty) {
+        rules.add(ParsedRule(freeText: plain.group(1)!.trim()));
       }
     }
     return rules;
   }
 
-  static String serializeRules(String source, List<PuzzleRule> rules) {
-    final lines = rules
-        .where(
-          (rule) =>
-              rule.result.trim().isNotEmpty ||
-              rule.conditions.any((e) => e.trim().isNotEmpty),
-        )
-        .map((rule) {
-          final mode = rule.matchMode.toUpperCase() == 'ANY' ? 'ANY' : 'ALL';
-          final joiner = mode == 'ANY' ? ' || ' : ' && ';
-          final properties = rule.properties
-              .map((e) => _escapeLogic(e.trim()))
-              .where((e) => e.isNotEmpty)
-              .join(', ');
-          final conditions = rule.conditions
-              .map((e) => _escapeLogic(e.trim()))
-              .where((e) => e.isNotEmpty)
-              .join(joiner);
-          final cause = rule.cause.trim().isEmpty
-              ? ''
-              : ' BECAUSE ${_escapeLogic(rule.cause.trim())}';
-          final verb =
-              const {
-                'MUST',
-                'USE',
-                'EMIT',
-                'RETURN',
-                'VERIFY',
-                'SKIP',
-                'AVOID',
-              }.contains(rule.verb.toUpperCase())
-              ? rule.verb.toUpperCase()
-              : 'MUST';
-          return '- [$properties] $mode($conditions)$cause => $verb ${_escapeLogic(rule.result.trim())}';
-        })
-        .toList();
-    return replaceSection(
-      source,
-      'Rules',
-      lines.join('\n'),
-      aliases: const ['规则'],
-    );
+  static String rulesSectionBody(String source) {
+    for (final section in sections(source)) {
+      final title = section.title.trim().toLowerCase();
+      if (title == 'rules' || title == '规则') {
+        return section.body.trim();
+      }
+    }
+    return '';
+  }
+
+  static String replaceRulesSection(String source, String body) {
+    final current = sections(source);
+    for (var index = 0; index < current.length; index++) {
+      final title = current[index].title.trim().toLowerCase();
+      if (title == 'rules' || title == '规则') {
+        return replaceSectionAt(
+          source,
+          index,
+          title: current[index].title,
+          body: body,
+        );
+      }
+    }
+    return addSection(source, title: 'Rules', body: body);
   }
 
   static String? sectionBody(String source, String title) {
@@ -696,10 +705,6 @@ class SkillMarkdown {
     return values.where((e) => e.isNotEmpty).toList();
   }
 
-  static String _escapeLogic(String value) => value
-      .replaceAll('\\', '\\\\')
-      .replaceAll('&&', '\\&&')
-      .replaceAll('||', '\\||');
   static String _unescapeLogic(String value) => value
       .replaceAll('\\&&', '&&')
       .replaceAll('\\||', '||')
