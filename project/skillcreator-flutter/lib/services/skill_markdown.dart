@@ -1,33 +1,3 @@
-class ParsedRule {
-  ParsedRule({
-    List<String>? properties,
-    this.matchMode = 'ALL',
-    List<String>? conditions,
-    this.cause = '',
-    this.verb = 'MUST',
-    this.result = '',
-    this.freeText = '',
-  }) : properties = properties ?? <String>[],
-       conditions = conditions ?? <String>[];
-  List<String> properties;
-  String matchMode;
-  List<String> conditions;
-  String cause;
-  String verb;
-  String result;
-  String freeText;
-
-  ParsedRule copy() => ParsedRule(
-    properties: List.of(properties),
-    matchMode: matchMode,
-    conditions: List.of(conditions),
-    cause: cause,
-    verb: verb,
-    result: result,
-    freeText: freeText,
-  );
-}
-
 class MarkdownIdentity {
   const MarkdownIdentity(this.name, this.description);
   final String name;
@@ -97,11 +67,6 @@ class _SectionHeading {
 }
 
 class SkillMarkdown {
-  static final RegExp _rulePattern = RegExp(
-    r'^[-*]\s+\[([^\]]*)\]\s+(ALL|ANY)\((.*?)\)(?:\s+BECAUSE\s+(.+?))?\s*=>\s*(MUST|USE|EMIT|RETURN|VERIFY|SKIP|AVOID)\s+(.+)$',
-    caseSensitive: false,
-  );
-
   static MarkdownIdentity identity(String source) {
     if (!source.startsWith('---')) return const MarkdownIdentity('', '');
     final end = source.indexOf('\n---', 3);
@@ -135,12 +100,13 @@ class SkillMarkdown {
     return '$frontmatter\n\n${source.trimLeft()}';
   }
 
-  static List<ParsedRule> parseRules(String source) {
+  static List<String> ruleTexts(String source) {
     final section = rulesSectionBody(source);
-    final rules = <ParsedRule>[];
+    final rules = <String>[];
     var inFence = false;
     var fenceCharacter = '';
     var fenceLength = 0;
+    final ruleLine = RegExp(r'^(?:[-*+]\s+|\d+[.)、]\s+)(.+)$');
     for (final raw in section.split(RegExp(r'\r?\n'))) {
       final fence = RegExp(r'^\s*(`{3,}|~{3,})').firstMatch(raw);
       if (fence != null) {
@@ -158,42 +124,9 @@ class SkillMarkdown {
         continue;
       }
       if (inFence) continue;
-
-      final line = raw.trim();
-      if (line.isEmpty) continue;
-      final match = _rulePattern.firstMatch(line);
-      if (match != null) {
-        rules.add(
-          ParsedRule(
-            properties: _splitEscaped(match.group(1) ?? '', ','),
-            matchMode: (match.group(2) ?? 'ALL').toUpperCase(),
-            conditions: _splitEscaped(
-              match.group(3) ?? '',
-              (match.group(2) ?? 'ALL').toUpperCase() == 'ANY' ? '||' : '&&',
-            ),
-            cause: _unescapeLogic(match.group(4) ?? ''),
-            verb: (match.group(5) ?? 'MUST').toUpperCase(),
-            result: _unescapeLogic(match.group(6) ?? ''),
-          ),
-        );
-        continue;
-      }
-      final chinese = RegExp(
-        r'^[-*]\s*(?:如果|若)\s*(.+?)(?:，|,)?\s*(?:那么|则)\s*(.+)$',
-      ).firstMatch(line);
-      if (chinese != null) {
-        rules.add(
-          ParsedRule(
-            conditions: [chinese.group(1)!.trim()],
-            result: chinese.group(2)!.trim(),
-          ),
-        );
-        continue;
-      }
-      final plain = RegExp(r'^(?:[-*+]\s+|\d+[.)、]\s+)(.+)$').firstMatch(line);
-      if (plain != null && plain.group(1)!.trim().isNotEmpty) {
-        rules.add(ParsedRule(freeText: plain.group(1)!.trim()));
-      }
+      final match = ruleLine.firstMatch(raw.trim());
+      final text = match?.group(1)?.trim() ?? '';
+      if (text.isNotEmpty) rules.add(text);
     }
     return rules;
   }
@@ -671,44 +604,6 @@ class SkillMarkdown {
       .replaceAll('\r', '\n')
       .replaceAll('\n', newline);
 
-  static List<String> _splitEscaped(String input, String delimiter) {
-    final values = <String>[];
-    final current = StringBuffer();
-    var escaped = false;
-    var i = 0;
-    while (i < input.length) {
-      final ch = input[i];
-      if (escaped) {
-        current.write(ch);
-        escaped = false;
-        i++;
-        continue;
-      }
-      if (ch == '\\') {
-        escaped = true;
-        current.write(ch);
-        i++;
-        continue;
-      }
-      if (input.startsWith(delimiter, i)) {
-        values.add(_unescapeLogic(current.toString().trim()));
-        current.clear();
-        i += delimiter.length;
-        continue;
-      }
-      current.write(ch);
-      i++;
-    }
-    if (current.isNotEmpty || input.isNotEmpty) {
-      values.add(_unescapeLogic(current.toString().trim()));
-    }
-    return values.where((e) => e.isNotEmpty).toList();
-  }
-
-  static String _unescapeLogic(String value) => value
-      .replaceAll('\\&&', '&&')
-      .replaceAll('\\||', '||')
-      .replaceAll('\\\\', '\\');
   static String _yamlScalar(String value) =>
       value.isEmpty || RegExp(r'[:#\[\]{}\n\r]|^[-?]|^\s|\s$').hasMatch(value)
       ? '"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"'

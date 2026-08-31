@@ -169,9 +169,6 @@ class _GraphNodeCard extends StatelessWidget {
       _NodeKind.skill => scheme.primaryContainer,
       _NodeKind.file => scheme.secondaryContainer,
       _NodeKind.rule => scheme.surfaceContainerHigh,
-      _NodeKind.condition => scheme.tertiaryContainer,
-      _NodeKind.cause => scheme.surfaceContainerHighest,
-      _NodeKind.result => scheme.errorContainer,
     };
     return Semantics(
       button: true,
@@ -239,7 +236,7 @@ class _Inspector extends StatelessWidget {
                   const SizedBox(height: 10),
                   Text('${graph.nodes.length} 个节点 · ${graph.edges.length} 条关系'),
                   const SizedBox(height: 16),
-                  const Text('选择节点查看属性、条件、因果或结果。图谱覆盖所有 Markdown 文件中的拼图规则。'),
+                  const Text('选择节点查看规则原文。图谱按 Markdown 文件展示自由语义规则，不推断条件、因果或结果。'),
                 ],
               )
             : Column(
@@ -268,7 +265,7 @@ class _Inspector extends StatelessWidget {
   }
 }
 
-enum _NodeKind { skill, file, rule, condition, cause, result }
+enum _NodeKind { skill, file, rule }
 
 class _GraphNode {
   const _GraphNode({
@@ -323,18 +320,8 @@ class _GraphLayout {
     var maxX = 980.0;
     for (var fileIndex = 0; fileIndex < controller.files.length; fileIndex++) {
       final file = controller.files[fileIndex];
-      final rules = SkillMarkdown.parseRules(file.content);
-      final blockRows = math.max(
-        1,
-        rules.fold<int>(
-          0,
-          (sum, rule) =>
-              sum +
-              (rule.freeText.trim().isNotEmpty
-                  ? 1
-                  : math.max(1, rule.conditions.length)),
-        ),
-      );
+      final rules = SkillMarkdown.ruleTexts(file.content);
+      final blockRows = math.max(1, rules.length);
       final fileStartY = y;
       final fileNodeId = 'file-$fileIndex';
       final fileNode = _GraphNode(
@@ -352,107 +339,21 @@ class _GraphLayout {
         continue;
       }
       for (var ruleIndex = 0; ruleIndex < rules.length; ruleIndex++) {
-        final rule = rules[ruleIndex];
-        final freeText = rule.freeText.trim();
-        if (freeText.isNotEmpty) {
-          final ruleId = 'rule-$fileIndex-$ruleIndex';
-          nodes.add(
-            _GraphNode(
-              id: ruleId,
-              kind: _NodeKind.rule,
-              title: freeText,
-              detail: '自由语义',
-              eyebrow: '规则',
-              rect: Rect.fromLTWH(560, y, nodeW, nodeH),
-            ),
-          );
-          edges.add(_GraphEdge(fileNodeId, ruleId, '规则 ${ruleIndex + 1}'));
-          y += nodeH + gapY;
-          maxX = math.max(maxX, 560 + nodeW + pad);
-          continue;
-        }
-
-        final conditionIds = <String>[];
-        for (
-          var conditionIndex = 0;
-          conditionIndex < rule.conditions.length;
-          conditionIndex++
-        ) {
-          final condition = rule.conditions[conditionIndex];
-          final id = 'condition-$fileIndex-$ruleIndex-$conditionIndex';
-          nodes.add(
-            _GraphNode(
-              id: id,
-              kind: _NodeKind.condition,
-              title: condition,
-              detail:
-                  '${rule.matchMode} · ${rule.properties.isEmpty ? '无属性' : rule.properties.join(', ')}',
-              eyebrow: conditionIndex == 0
-                  ? '如果'
-                  : (rule.matchMode == 'ANY' ? '或者' : '并且'),
-              rect: Rect.fromLTWH(560, y, nodeW, nodeH),
-            ),
-          );
-          conditionIds.add(id);
-          edges.add(
-            _GraphEdge(
-              fileNodeId,
-              id,
-              conditionIndex == 0 ? '规则 ${ruleIndex + 1}' : rule.matchMode,
-            ),
-          );
-          y += nodeH + gapY;
-        }
-
-        var source = conditionIds.isEmpty ? fileNodeId : conditionIds.last;
-        final rowY = conditionIds.isEmpty ? y : y - nodeH - gapY;
-        if (rule.cause.isNotEmpty) {
-          final causeId = 'cause-$fileIndex-$ruleIndex';
-          final causeX = conditionIds.isEmpty ? 560.0 : 820.0;
-          nodes.add(
-            _GraphNode(
-              id: causeId,
-              kind: _NodeKind.cause,
-              title: rule.cause,
-              detail: 'BECAUSE',
-              eyebrow: '因为',
-              rect: Rect.fromLTWH(causeX, rowY, nodeW, nodeH),
-            ),
-          );
-          edges.add(_GraphEdge(source, causeId, '因为'));
-          source = causeId;
-          maxX = math.max(maxX, causeX + nodeW + pad);
-        }
-
-        final resultId = 'result-$fileIndex-$ruleIndex';
-        final resultX = rule.cause.isNotEmpty
-            ? (conditionIds.isEmpty ? 820.0 : 1080.0)
-            : (conditionIds.isEmpty ? 560.0 : 820.0);
+        final ruleText = rules[ruleIndex].trim();
+        final ruleId = 'rule-$fileIndex-$ruleIndex';
         nodes.add(
           _GraphNode(
-            id: resultId,
-            kind: conditionIds.isEmpty && rule.cause.isEmpty
-                ? _NodeKind.rule
-                : _NodeKind.result,
-            title: rule.result.isEmpty ? '未填写结果' : rule.result,
-            detail: rule.verb,
-            eyebrow: conditionIds.isEmpty && rule.cause.isEmpty ? '规则' : '结果',
-            rect: Rect.fromLTWH(resultX, rowY, nodeW, nodeH),
+            id: ruleId,
+            kind: _NodeKind.rule,
+            title: ruleText,
+            detail: '自由语义',
+            eyebrow: '规则',
+            rect: Rect.fromLTWH(560, y, nodeW, nodeH),
           ),
         );
-        edges.add(
-          _GraphEdge(
-            source,
-            resultId,
-            conditionIds.isEmpty && rule.cause.isEmpty
-                ? '规则 ${ruleIndex + 1}'
-                : '=> ${rule.verb}',
-          ),
-        );
-        if (conditionIds.isEmpty) {
-          y += nodeH + gapY;
-        }
-        maxX = math.max(maxX, resultX + nodeW + pad);
+        edges.add(_GraphEdge(fileNodeId, ruleId, '规则 ${ruleIndex + 1}'));
+        y += nodeH + gapY;
+        maxX = math.max(maxX, 560 + nodeW + pad);
       }
       y = math.max(y, fileStartY + blockRows * (nodeH + gapY));
       y += 18;

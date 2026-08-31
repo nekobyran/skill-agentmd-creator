@@ -64,25 +64,23 @@ Keep validation unchanged.
     },
   );
 
-  test('rule parser distinguishes free semantic and explicit conditions', () {
+  test('rule text extraction is wording agnostic', () {
     const source = '''## Rules
 
 1. Preserve the direct requirement.
 - 如果 input is missing，那么 request it explicitly
+- [scope=cli] ALL(bundle requested) => MUST load only this block
 
 ```text
 3. This fenced example is not a rule.
 ```
 ''';
 
-    final rules = SkillMarkdown.parseRules(source);
-    expect(rules, hasLength(2));
-
-    expect(rules[0].freeText, 'Preserve the direct requirement.');
-    expect(rules[0].conditions, isEmpty);
-    expect(rules[1].freeText, isEmpty);
-    expect(rules[1].conditions, ['input is missing']);
-    expect(rules[1].result, 'request it explicitly');
+    expect(SkillMarkdown.ruleTexts(source), [
+      'Preserve the direct requirement.',
+      '如果 input is missing，那么 request it explicitly',
+      '[scope=cli] ALL(bundle requested) => MUST load only this block',
+    ]);
   });
 
   test('section editor ignores headings inside fenced code blocks', () {
