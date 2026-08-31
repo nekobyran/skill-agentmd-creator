@@ -509,7 +509,7 @@ class _SkillLibraryPageState extends State<SkillLibraryPage> {
                                   ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  '${entry.source} · ${entry.fileCount} files · ${entry.byteSize} bytes · ${entry.editorChain}',
+                                  '${entry.source} · ${entry.fileCount} files · ${entry.byteSize} bytes',
                                   style: Theme.of(context).textTheme.bodySmall,
                                 ),
                                 if (entry.formatGaps.isNotEmpty)

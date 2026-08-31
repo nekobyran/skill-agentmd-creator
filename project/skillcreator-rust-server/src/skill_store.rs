@@ -118,7 +118,6 @@ pub struct CodexSkillCatalogEntry {
     pub byte_size: u64,
     pub imported: bool,
     pub imported_id: Option<String>,
-    pub editor_chain: String,
     pub format_gaps: Vec<String>,
     pub loadable: bool,
 }
@@ -1285,7 +1284,7 @@ pub fn scan_codex_skills_at(workspace_root: &Path) -> Result<CodexSkillCatalog, 
         }
         let catalog_id = stable_catalog_id(&source_key);
         let imported_id = imported.get(&catalog_id).cloned();
-        let compatibility = analyze_editor_compatibility(&content, readable && !limited);
+        let diagnostics = analyze_editor_diagnostics(&content, readable && !limited);
         let relative_path = canonical
             .strip_prefix(&codex_home)
             .unwrap_or(&canonical)
@@ -1302,9 +1301,8 @@ pub fn scan_codex_skills_at(workspace_root: &Path) -> Result<CodexSkillCatalog, 
             byte_size,
             imported: imported_id.is_some(),
             imported_id,
-            editor_chain: compatibility.editor_chain,
-            format_gaps: compatibility.format_gaps,
-            loadable: compatibility.loadable,
+            format_gaps: diagnostics.format_gaps,
+            loadable: diagnostics.loadable,
         });
     }
     entries.sort_by(|left, right| {
@@ -1322,13 +1320,12 @@ pub fn scan_codex_skills_at(workspace_root: &Path) -> Result<CodexSkillCatalog, 
     })
 }
 
-struct EditorCompatibility {
-    editor_chain: String,
+struct EditorDiagnostics {
     format_gaps: Vec<String>,
     loadable: bool,
 }
 
-fn analyze_editor_compatibility(content: &str, loadable: bool) -> EditorCompatibility {
+fn analyze_editor_diagnostics(content: &str, loadable: bool) -> EditorDiagnostics {
     let mut format_gaps = Vec::new();
     if frontmatter_value(content, "name").is_none() {
         format_gaps.push("缺少 frontmatter.name".to_string());
@@ -1343,21 +1340,11 @@ fn analyze_editor_compatibility(content: &str, loadable: bool) -> EditorCompatib
         .map(str::trim)
         .collect();
     let has_rule_section = headings.contains("规则") || headings.contains("Rules");
-    let has_section = !headings.is_empty();
     if !has_rule_section {
         format_gaps.push("缺少标准“规则”章节".to_string());
     }
 
-    let editor_chain = if !loadable {
-        "source-repair"
-    } else if has_section {
-        "structured-sections"
-    } else {
-        "lossless-isomorphic"
-    };
-
-    EditorCompatibility {
-        editor_chain: editor_chain.to_string(),
+    EditorDiagnostics {
         format_gaps,
         loadable,
     }
@@ -3074,7 +3061,6 @@ mod tests {
             byte_size: 80,
             imported: false,
             imported_id: None,
-            editor_chain: "lossless-isomorphic".to_string(),
             format_gaps: Vec::new(),
             loadable: true,
         };
@@ -3091,28 +3077,28 @@ mod tests {
     }
 
     #[test]
-    fn classifies_structured_and_lossless_editor_chains() {
-        let standard = analyze_editor_compatibility(
+    fn reports_rule_section_format_gaps() {
+        let standard = analyze_editor_diagnostics(
             "---\nname: demo\ndescription: Demo\n---\n\n## 规则\n- Keep the requested semantics intact.\n",
             true,
         );
-        assert_eq!(standard.editor_chain, "structured-sections");
         assert!(standard.format_gaps.is_empty());
 
-        let arbitrary = analyze_editor_compatibility(
+        let arbitrary = analyze_editor_diagnostics(
             "---\nname: demo\ndescription: Demo\n---\n\n## Arbitrary\nKeep every node.\n",
             true,
         );
-        assert_eq!(arbitrary.editor_chain, "structured-sections");
         assert!(arbitrary
             .format_gaps
             .contains(&"缺少标准“规则”章节".to_string()));
 
-        let plain = analyze_editor_compatibility(
+        let plain = analyze_editor_diagnostics(
             "---\nname: demo\ndescription: Demo\n---\n\nKeep every byte.\n",
             true,
         );
-        assert_eq!(plain.editor_chain, "lossless-isomorphic");
+        assert!(plain
+            .format_gaps
+            .contains(&"缺少标准“规则”章节".to_string()));
     }
 
     #[test]
@@ -3123,9 +3109,8 @@ mod tests {
             "Preserve the direct requirement.",
         ] {
             let content = format!("---\nname: demo\ndescription: Demo\n---\n\n## 规则\n- {rule}\n");
-            let compatibility = analyze_editor_compatibility(&content, true);
-            assert_eq!(compatibility.editor_chain, "structured-sections");
-            assert!(compatibility.format_gaps.is_empty());
+            let diagnostics = analyze_editor_diagnostics(&content, true);
+            assert!(diagnostics.format_gaps.is_empty());
         }
     }
 

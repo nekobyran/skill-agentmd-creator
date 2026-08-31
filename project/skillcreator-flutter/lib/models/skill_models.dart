@@ -152,7 +152,6 @@ class CodexSkillEntry {
     required this.byteSize,
     required this.imported,
     required this.importedId,
-    required this.editorChain,
     required this.formatGaps,
     required this.loadable,
   });
@@ -166,7 +165,6 @@ class CodexSkillEntry {
   final int byteSize;
   final bool imported;
   final String? importedId;
-  final String editorChain;
   final List<String> formatGaps;
   final bool loadable;
   factory CodexSkillEntry.fromJson(Map<String, dynamic> json) =>
@@ -181,7 +179,6 @@ class CodexSkillEntry {
         byteSize: (json['byteSize'] as num?)?.toInt() ?? 0,
         imported: json['imported'] as bool? ?? false,
         importedId: json['importedId'] as String?,
-        editorChain: json['editorChain'] as String? ?? '',
         formatGaps: ((json['formatGaps'] as List?) ?? const [])
             .whereType<String>()
             .toList(),

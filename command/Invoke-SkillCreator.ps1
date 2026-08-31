@@ -914,11 +914,6 @@ switch ($Action) {
     }
     "audit" {
         $catalog = Invoke-Api -Method GET -Path "/codex_skills"
-        $chainCounts = [ordered]@{
-            structuredSections = @($catalog.entries | Where-Object editorChain -eq "structured-sections").Count
-            losslessIsomorphic = @($catalog.entries | Where-Object editorChain -eq "lossless-isomorphic").Count
-            sourceRepair = @($catalog.entries | Where-Object editorChain -eq "source-repair").Count
-        }
         $result = [ordered]@{
             schemaVersion = 1
             action = "audit"
@@ -927,7 +922,6 @@ switch ($Action) {
             total = @($catalog.entries).Count
             loadable = @($catalog.entries | Where-Object loadable).Count
             unsupported = @($catalog.entries | Where-Object { -not $_.loadable }).Count
-            chains = $chainCounts
             warnings = @($catalog.warnings)
             entries = @($catalog.entries | ForEach-Object {
                 [ordered]@{
@@ -935,7 +929,6 @@ switch ($Action) {
                     name = $_.name
                     source = $_.source
                     sourcePath = $_.sourcePath
-                    editorChain = $_.editorChain
                     loadable = $_.loadable
                     formatGaps = @($_.formatGaps)
                     imported = $_.imported
