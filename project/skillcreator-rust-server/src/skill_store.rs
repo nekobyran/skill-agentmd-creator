@@ -9,7 +9,6 @@ use std::{
 };
 
 pub const SKILL_FILE_NAME: &str = "SKILL.md";
-pub const LEGACY_EXTENSION: &str = "agentmd";
 pub const ENTRY_FILE_NAME: &str = "agent-entry.json";
 #[allow(dead_code)]
 pub const API_HOST: &str = "127.0.0.1";
@@ -291,7 +290,6 @@ pub struct EntryManifest {
     pub description: String,
     pub entry_root: String,
     pub supported_files: Vec<String>,
-    pub legacy_read_extensions: Vec<String>,
     pub cli_hint: String,
 }
 
@@ -464,10 +462,6 @@ pub fn workspace_root_from_data_dir(data_dir: &Path) -> Result<PathBuf, String> 
     let root = data_dir.join("skills");
     fs::create_dir_all(&root).map_err(|error| error.to_string())?;
     Ok(root)
-}
-
-pub fn legacy_root_from_data_dir(data_dir: &Path) -> PathBuf {
-    data_dir.join("agentmd")
 }
 
 #[cfg(windows)]
@@ -2180,7 +2174,7 @@ fn read_skill_files(skill_dir: &Path) -> Result<Vec<SkillMarkdownFile>, String> 
     Ok(files)
 }
 
-pub fn list_skills_at(root: &Path, legacy_root: &Path) -> Result<Vec<SkillSummary>, String> {
+pub fn list_skills_at(root: &Path) -> Result<Vec<SkillSummary>, String> {
     fs::create_dir_all(root).map_err(|error| error.to_string())?;
     let mut skills = Vec::new();
     for entry in fs::read_dir(root).map_err(|error| error.to_string())? {
@@ -2197,58 +2191,24 @@ pub fn list_skills_at(root: &Path, legacy_root: &Path) -> Result<Vec<SkillSummar
         }
     }
 
-    if legacy_root.exists() {
-        for entry in fs::read_dir(legacy_root).map_err(|error| error.to_string())? {
-            let entry = entry.map_err(|error| error.to_string())?;
-            let path = entry.path();
-            if path.extension().and_then(|value| value.to_str()) != Some(LEGACY_EXTENSION) {
-                continue;
-            }
-
-            let content = fs::read_to_string(&path).unwrap_or_default();
-            skills.push(summary_from_file(&path, &content));
-        }
-    }
-
     skills.sort_by_key(|skill| std::cmp::Reverse(skill.updated_at));
     Ok(skills)
 }
 
-pub fn read_skill_at(root: &Path, legacy_root: &Path, id: &str) -> Result<SkillContent, String> {
-    let path = skill_file_path_for_id(root, legacy_root, id)?;
+pub fn read_skill_at(root: &Path, id: &str) -> Result<SkillContent, String> {
+    let path = skill_file_path_for_id(root, id)?;
     let content = fs::read_to_string(&path).map_err(|error| error.to_string())?;
     let summary = summary_from_file(&path, &content);
-    let is_standard_skill =
-        path.file_name().and_then(|name| name.to_str()) == Some(SKILL_FILE_NAME);
-    let files = if is_standard_skill {
-        read_skill_files(path.parent().ok_or_else(|| "技能目录无效".to_string())?)?
-    } else {
-        vec![SkillMarkdownFile {
-            path: path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("legacy.agentmd")
-                .to_string(),
-            content: content.clone(),
-            byte_size: content.len() as u64,
-            is_entry: true,
-        }]
-    };
-    let index_mode = is_standard_skill && files.iter().any(|file| !file.is_entry);
+    let skill_dir = path.parent().ok_or_else(|| "技能目录无效".to_string())?;
+    let files = read_skill_files(skill_dir)?;
+    let index_mode = files.iter().any(|file| !file.is_entry);
     Ok(SkillContent {
         id: summary.id,
         name: summary.name,
         description: summary.description,
         file_path: summary.file_path,
         content,
-        entry_file: if is_standard_skill {
-            SKILL_FILE_NAME.to_string()
-        } else {
-            files
-                .first()
-                .map(|file| file.path.clone())
-                .unwrap_or_default()
-        },
+        entry_file: SKILL_FILE_NAME.to_string(),
         index_mode,
         files,
     })
@@ -2294,43 +2254,27 @@ pub fn create_skill_at(root: &Path, draft: SkillDraft) -> Result<CreateResult, S
     })
 }
 
-pub fn delete_skill_at(root: &Path, legacy_root: &Path, id: &str) -> Result<(), String> {
+pub fn delete_skill_at(root: &Path, id: &str) -> Result<(), String> {
     let _write_lock = acquire_workspace_write_lock(root)?;
-    let file_path = skill_file_path_for_id(root, legacy_root, id)?;
-    if file_path.file_name().and_then(|name| name.to_str()) == Some(SKILL_FILE_NAME) {
-        let skill_dir = file_path
-            .parent()
-            .ok_or_else(|| "技能目录无效".to_string())?;
-        write_entry_manifest(root)?;
-        fs::remove_dir_all(skill_dir).map_err(|error| error.to_string())?;
-    } else {
-        fs::remove_file(file_path).map_err(|error| error.to_string())?;
-    }
+    let file_path = skill_file_path_for_id(root, id)?;
+    let skill_dir = file_path
+        .parent()
+        .ok_or_else(|| "技能目录无效".to_string())?;
+    write_entry_manifest(root)?;
+    fs::remove_dir_all(skill_dir).map_err(|error| error.to_string())?;
     Ok(())
 }
 
-pub fn update_skill_at(
-    root: &Path,
-    legacy_root: &Path,
-    id: &str,
-    draft: SkillDraft,
-) -> Result<CreateResult, String> {
+pub fn update_skill_at(root: &Path, id: &str, draft: SkillDraft) -> Result<CreateResult, String> {
     let _write_lock = acquire_workspace_write_lock(root)?;
-    let file_path = skill_file_path_for_id(root, legacy_root, id)?;
-    let is_standard_skill =
-        file_path.file_name().and_then(|name| name.to_str()) == Some(SKILL_FILE_NAME);
-    let skill_name = if is_standard_skill {
-        file_path
-            .parent()
-            .and_then(|parent| parent.file_name())
-            .and_then(|name| name.to_str())
-            .unwrap_or(id.trim())
-    } else {
-        file_path
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .unwrap_or(id.trim())
-    };
+    let file_path = skill_file_path_for_id(root, id)?;
+    let skill_dir = file_path
+        .parent()
+        .ok_or_else(|| "技能目录无效".to_string())?;
+    let skill_name = skill_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(id.trim());
     let document_name = if draft.name.trim().is_empty() {
         skill_name
     } else {
@@ -2341,26 +2285,13 @@ pub fn update_skill_at(
     let prepared_deleted_files = prepare_deleted_files(&draft.deleted_files)?;
     let entry_path = write_entry_manifest(root)?;
 
-    let mut written_files = vec![file_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(SKILL_FILE_NAME)
-        .to_string()];
-    if is_standard_skill {
-        let skill_dir = file_path
-            .parent()
-            .ok_or_else(|| "技能目录无效".to_string())?;
-        written_files.extend(update_skill_file_bundle(
-            skill_dir,
-            markdown.as_bytes(),
-            &prepared_files,
-            &prepared_deleted_files,
-        )?);
-    } else if !draft.files.is_empty() || !draft.deleted_files.is_empty() {
-        return Err("旧 .agentmd 技能不支持多文件；请先迁移为 SKILL.md 目录".to_string());
-    } else {
-        atomic_write_file(&file_path, markdown.as_bytes())?;
-    }
+    let mut written_files = vec![SKILL_FILE_NAME.to_string()];
+    written_files.extend(update_skill_file_bundle(
+        skill_dir,
+        markdown.as_bytes(),
+        &prepared_files,
+        &prepared_deleted_files,
+    )?);
 
     Ok(CreateResult {
         file_path: file_path.to_string_lossy().to_string(),
@@ -2380,21 +2311,14 @@ fn ensure_inside_root(root: &Path, path: &Path) -> Result<(), String> {
     }
 }
 
-fn skill_file_path_for_id(root: &Path, legacy_root: &Path, id: &str) -> Result<PathBuf, String> {
+fn skill_file_path_for_id(root: &Path, id: &str) -> Result<PathBuf, String> {
     let id = clean_skill_id(id)?;
-    let standard_path = root.join(id).join(SKILL_FILE_NAME);
-    if standard_path.exists() {
-        ensure_inside_root(root, &standard_path)?;
-        return Ok(standard_path);
+    let path = root.join(id).join(SKILL_FILE_NAME);
+    if !path.exists() {
+        return Err("未找到 skill".to_string());
     }
-
-    let legacy_path = legacy_root.join(id);
-    if legacy_path.exists() {
-        ensure_inside_root(legacy_root, &legacy_path)?;
-        return Ok(legacy_path);
-    }
-
-    Err("未找到 skill".to_string())
+    ensure_inside_root(root, &path)?;
+    Ok(path)
 }
 
 fn clean_skill_id(id: &str) -> Result<&str, String> {
@@ -2407,28 +2331,14 @@ fn clean_skill_id(id: &str) -> Result<&str, String> {
 }
 
 fn summary_from_file(path: &Path, content: &str) -> SkillSummary {
-    let is_standard_skill =
-        path.file_name().and_then(|name| name.to_str()) == Some(SKILL_FILE_NAME);
-    let id = if is_standard_skill {
-        path.parent()
-            .and_then(|parent| parent.file_name())
-            .and_then(|name| name.to_str())
-            .unwrap_or_default()
-            .to_string()
-    } else {
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default()
-            .to_string()
-    };
-    let fallback_name = if is_standard_skill {
-        id.clone()
-    } else {
-        path.file_stem()
-            .and_then(|name| name.to_str())
-            .unwrap_or("skill")
-            .to_string()
-    };
+    let id = path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let fallback_name = id.clone();
+
     let updated_at = path
         .metadata()
         .and_then(|metadata| metadata.modified())
@@ -3238,13 +3148,13 @@ fn write_entry_manifest(root: &Path) -> Result<PathBuf, String> {
     let payload = EntryManifest {
         tool: "skill-agentmd-creator".to_string(),
         version: "2.0".to_string(),
-        description: "结构化创建标准 Codex Skill：生成 skill-name/SKILL.md，顶部规则自动编号，条件规则自动压缩为 如果/那么，流程结果自动用箭头连接。".to_string(),
+                description: "结构化创建标准 Codex Skill：生成 skill-name/SKILL.md，顶部规则自动编号，条件规则自动压缩为 如果/那么，流程结果自动用箭头连接。".to_string(),
         entry_root: root.to_string_lossy().to_string(),
         supported_files: vec![SKILL_FILE_NAME.to_string()],
-        legacy_read_extensions: vec![format!(".{LEGACY_EXTENSION}")],
         cli_hint: r#"{
   "name": "CreateSkill",
   "args": {
+
         "name": "string",
         "description": "string",
     "aliases": ["string"],
@@ -4036,9 +3946,7 @@ mod tests {
             .join("skill-multifile-tests")
             .join(format!("{}-{nonce}", std::process::id()));
         let library = root.join("library");
-        let legacy = root.join("legacy");
         fs::create_dir_all(&library).unwrap();
-        fs::create_dir_all(&legacy).unwrap();
 
         let source = concat!(
             "---\n",
@@ -4070,7 +3978,7 @@ mod tests {
             .written_files
             .contains(&"assets/check.ps1".to_string()));
 
-        let loaded = read_skill_at(&library, &legacy, "bundle").expect("bundle should load");
+        let loaded = read_skill_at(&library, "bundle").expect("bundle should load");
         assert!(loaded.index_mode);
         assert_eq!(loaded.entry_file, "SKILL.md");
         assert!(loaded
@@ -4096,10 +4004,10 @@ mod tests {
             content: "# Core changed\n".to_string(),
         }];
         overlap.deleted_files = vec!["rules/core.md".to_string()];
-        let overlap_error = update_skill_at(&library, &legacy, "bundle", overlap)
+        let overlap_error = update_skill_at(&library, "bundle", overlap)
             .expect_err("write/delete overlap must fail");
         assert!(overlap_error.contains("同时写入和删除"));
-        let after_overlap = read_skill_at(&library, &legacy, "bundle").unwrap();
+        let after_overlap = read_skill_at(&library, "bundle").unwrap();
         assert_eq!(after_overlap.content, original_entry);
         assert_eq!(
             after_overlap
@@ -4113,17 +4021,17 @@ mod tests {
         let mut invalid_delete = source_draft("bundle", &loaded.content);
         invalid_delete.description = "This invalid delete must not change entry.".to_string();
         invalid_delete.deleted_files = vec!["../escape.md".to_string()];
-        let invalid_delete_error = update_skill_at(&library, &legacy, "bundle", invalid_delete)
+        let invalid_delete_error = update_skill_at(&library, "bundle", invalid_delete)
             .expect_err("invalid deletedFiles must fail before entry write");
         assert!(invalid_delete_error.contains("非法"));
-        let after_invalid_delete = read_skill_at(&library, &legacy, "bundle").unwrap();
+        let after_invalid_delete = read_skill_at(&library, "bundle").unwrap();
         assert_eq!(after_invalid_delete.content, original_entry);
 
         let mut update = source_draft("bundle", &loaded.content);
         update.deleted_files = vec!["rules/core.md".to_string(), "assets/check.ps1".to_string()];
-        update_skill_at(&library, &legacy, "bundle", update)
+        update_skill_at(&library, "bundle", update)
             .expect("explicit child deletion should succeed");
-        let reloaded = read_skill_at(&library, &legacy, "bundle").expect("bundle should reload");
+        let reloaded = read_skill_at(&library, "bundle").expect("bundle should reload");
         assert!(!reloaded.index_mode);
         assert!(!reloaded
             .files
@@ -4143,6 +4051,37 @@ mod tests {
         assert!(error.contains("非法"));
         assert!(!library.join("unsafe").exists());
         assert!(!root.join("escape.md").exists());
+
+        fs::remove_dir_all(root).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn list_skills_ignores_legacy_agentmd_flat_files() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("skill-list-tests")
+            .join(format!("{}-{nonce}", std::process::id()));
+        let canonical = root.join("current");
+        fs::create_dir_all(&canonical).expect("canonical directory should be created");
+        fs::write(
+            canonical.join(SKILL_FILE_NAME),
+            "---\nname: current\ndescription: Canonical skill.\n---\n",
+        )
+        .expect("canonical skill should be written");
+        fs::write(
+            root.join("old.agentmd"),
+            "---\nname: old\ndescription: Legacy flat skill.\n---\n",
+        )
+        .expect("legacy fixture should be written");
+
+        let skills = list_skills_at(&root).expect("skill list should load");
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].id, "current");
+        assert_eq!(skills[0].name, "current");
 
         fs::remove_dir_all(root).expect("test directory should be removed");
     }

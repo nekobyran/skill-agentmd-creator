@@ -6,10 +6,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use skill_store::{
     codex_model_status_at, create_skill_at, default_app_data_dir, delete_skill_at, design_skill_at,
-    ensure_manifest_at, import_codex_skills_at, legacy_root_from_data_dir, list_skills_at,
-    read_skill_at, scan_codex_skills_at, set_codex_model_at, translate_rule_to_english_at,
-    update_skill_at, CodexSkillImportRequest, DesignSkillRequest, SkillDraft, API_BODY_LIMIT,
-    API_HOST, API_PORT,
+    ensure_manifest_at, import_codex_skills_at, list_skills_at, read_skill_at,
+    scan_codex_skills_at, set_codex_model_at, translate_rule_to_english_at, update_skill_at,
+    CodexSkillImportRequest, DesignSkillRequest, SkillDraft, API_BODY_LIMIT, API_HOST, API_PORT,
 };
 use std::{
     collections::HashMap,
@@ -51,7 +50,6 @@ struct HealthResponse {
 #[derive(Debug)]
 struct ApiState {
     root: PathBuf,
-    legacy_root: PathBuf,
     data_dir: PathBuf,
     skill_write_lock: Mutex<()>,
 }
@@ -74,13 +72,12 @@ fn main() {
 fn run() -> Result<(), String> {
     let data_dir = default_app_data_dir()?;
     let root = skill_store::workspace_root_from_data_dir(&data_dir)?;
-    let legacy_root = legacy_root_from_data_dir(&data_dir);
     let state = Arc::new(ApiState {
         root,
-        legacy_root,
         data_dir,
         skill_write_lock: Mutex::new(()),
     });
+
     let listener = TcpListener::bind((API_HOST, API_PORT)).map_err(|error| {
         format!("无法绑定 {API_HOST}:{API_PORT}：{error}。如果已启动，可直接复用现有后台。")
     })?;
@@ -243,7 +240,7 @@ fn handle_request(request: HttpRequest, state: &ApiState) -> String {
                 })
                 .and_then(|result| json_response(200, &result))
         }
-        ("GET", "/api/skills") => json_result(list_skills_at(&state.root, &state.legacy_root)),
+        ("GET", "/api/skills") => json_result(list_skills_at(&state.root)),
         ("POST", "/api/skills") => parse_skill_request(&request)
             .and_then(|payload| {
                 with_skill_write_lock(state, || create_skill_at(&state.root, payload.draft))
@@ -251,24 +248,22 @@ fn handle_request(request: HttpRequest, state: &ApiState) -> String {
             .and_then(|result| json_response(200, &result)),
         _ if request.method == "GET" && request.path.starts_with("/api/skills/") => {
             let id = route_id(&request.path);
-            json_result(read_skill_at(&state.root, &state.legacy_root, &id))
+            json_result(read_skill_at(&state.root, &id))
         }
         _ if request.method == "PUT" && request.path.starts_with("/api/skills/") => {
             let id = route_id(&request.path);
             parse_skill_request(&request)
                 .and_then(|payload| {
                     with_skill_write_lock(state, || {
-                        update_skill_at(&state.root, &state.legacy_root, &id, payload.draft)
+                        update_skill_at(&state.root, &id, payload.draft)
                     })
                 })
                 .and_then(|result| json_response(200, &result))
         }
         _ if request.method == "DELETE" && request.path.starts_with("/api/skills/") => {
             let id = route_id(&request.path);
-            with_skill_write_lock(state, || {
-                delete_skill_at(&state.root, &state.legacy_root, &id)
-            })
-            .and_then(|_| json_response(200, &serde_json::json!({ "ok": true })))
+            with_skill_write_lock(state, || delete_skill_at(&state.root, &id))
+                .and_then(|_| json_response(200, &serde_json::json!({ "ok": true })))
         }
         _ => Err((404, "未找到 API".to_string())),
     };
@@ -385,10 +380,10 @@ mod tests {
     fn skill_write_lock_serializes_mutations() {
         let state = Arc::new(ApiState {
             root: PathBuf::new(),
-            legacy_root: PathBuf::new(),
             data_dir: PathBuf::new(),
             skill_write_lock: Mutex::new(()),
         });
+
         let active = Arc::new(AtomicUsize::new(0));
         let max_active = Arc::new(AtomicUsize::new(0));
         let barrier = Arc::new(Barrier::new(9));
