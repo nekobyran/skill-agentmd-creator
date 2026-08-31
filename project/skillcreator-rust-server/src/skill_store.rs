@@ -100,14 +100,12 @@ pub struct TopRuleKnowledge {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SkillRule {
     #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub category: String,
-    #[serde(default)]
-    pub conditions: Vec<String>,
     #[serde(default)]
     pub trigger_conditions: Vec<RuleCondition>,
     #[serde(default)]
@@ -3037,12 +3035,6 @@ fn first_non_empty<const N: usize>(values: [&str; N]) -> &str {
 }
 
 fn render_condition_text(rule: &SkillRule) -> String {
-    let legacy_conditions: Vec<&str> = rule
-        .conditions
-        .iter()
-        .map(|condition| condition.trim())
-        .filter(|condition| !condition.is_empty())
-        .collect();
     let trigger_conditions: Vec<&str> = rule
         .trigger_conditions
         .iter()
@@ -3062,17 +3054,13 @@ fn render_condition_text(rule: &SkillRule) -> String {
         .filter(|condition| !condition.is_empty())
         .collect();
 
-    let mut triggers = Vec::new();
-    triggers.extend(legacy_conditions);
-    triggers.extend(trigger_conditions);
-
-    match (triggers.is_empty(), limit_conditions.is_empty()) {
+    match (trigger_conditions.is_empty(), limit_conditions.is_empty()) {
         (false, false) => format!(
             "{}，限制 {}",
-            triggers.join(" 并且 "),
+            trigger_conditions.join(" 并且 "),
             limit_conditions.join(" 并且 ")
         ),
-        (false, true) => triggers.join(" 并且 "),
+        (false, true) => trigger_conditions.join(" 并且 "),
         (true, false) => format!("限制 {}", limit_conditions.join(" 并且 ")),
         (true, true) => String::new(),
     }
@@ -3198,6 +3186,31 @@ mod tests {
     }
 
     #[test]
+    fn rejects_legacy_skill_rule_conditions_but_accepts_route_conditions() {
+        let legacy = serde_json::json!({
+            "conditions": ["legacy"],
+            "routes": []
+        });
+        let error = serde_json::from_value::<SkillRule>(legacy)
+            .expect_err("legacy SkillRule.conditions should be rejected");
+        let message = error.to_string();
+        assert!(message.contains("unknown field"));
+        assert!(message.contains("conditions"));
+
+        let current = serde_json::json!({
+            "routes": [{
+                "route": "branch",
+                "conditions": [{"alias": "route condition", "content": "x"}],
+                "result": {"kind": "requirement", "requirement": "y", "steps": []}
+            }]
+        });
+        let parsed = serde_json::from_value::<SkillRule>(current)
+            .expect("current RuleRoute.conditions should remain supported");
+        assert_eq!(parsed.routes.len(), 1);
+        assert_eq!(parsed.routes[0].conditions.len(), 1);
+        assert_eq!(parsed.routes[0].conditions[0].content, "x");
+    }
+    #[test]
     fn renders_compact_structured_skill() {
         let draft = SkillDraft {
             name: "测试 skill".to_string(),
@@ -3227,7 +3240,6 @@ mod tests {
                 rule_triggers: vec![],
                 rule_trigger_routes: vec![],
                 rule_limit_links: vec![],
-                conditions: vec![],
                 trigger_conditions: vec![RuleCondition {
                     alias: "用户要求 UI".to_string(),
                     content: "用户要求 UI".to_string(),
@@ -3301,7 +3313,6 @@ mod tests {
         let rule = SkillRule {
             name: "editor-only name".to_string(),
             category: String::new(),
-            conditions: vec![],
             trigger_conditions: vec![],
             limit_conditions: vec![],
             routes: vec![],
@@ -3359,7 +3370,6 @@ mod tests {
         let make_rule = |suffix: &str| SkillRule {
             name: format!("name-{suffix}"),
             category: String::new(),
-            conditions: vec![],
             trigger_conditions: vec![],
             limit_conditions: vec![],
             routes: vec![],
@@ -3669,7 +3679,6 @@ mod tests {
         let rule = SkillRule {
             name: "branch-flow".to_string(),
             category: "routing".to_string(),
-            conditions: vec![],
             trigger_conditions: vec![],
             limit_conditions: vec![],
             routes: vec![
