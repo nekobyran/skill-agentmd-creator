@@ -2698,7 +2698,7 @@ fn write_entry_manifest(root: &Path) -> Result<PathBuf, String> {
     fs::create_dir_all(root).map_err(|error| error.to_string())?;
     let entry_path = root.join(ENTRY_FILE_NAME);
     let payload = EntryManifest {
-        tool: "skill-agentmd-creator".to_string(),
+        tool: "skillcreator".to_string(),
         version: "2.0".to_string(),
         description: "规范化创建标准 Codex Skill：生成 skill-name/SKILL.md，保留规则自由语义，仅在语义明确需要时编码条件、流程与验证结构。".to_string(),
         entry_root: root.to_string_lossy().to_string(),
@@ -2763,6 +2763,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn entry_manifest_uses_skillcreator_tool_identity() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "skillcreator-entry-manifest-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("test directory should be created");
+        ensure_manifest_at(&root).expect("entry manifest should be written");
+        let content = fs::read_to_string(root.join(ENTRY_FILE_NAME))
+            .expect("entry manifest should be readable");
+        let manifest: serde_json::Value =
+            serde_json::from_str(&content).expect("entry manifest should be valid JSON");
+        assert_eq!(manifest["tool"], "skillcreator");
+        assert!(!content.contains("skill-agentmd-creator"));
+        fs::remove_dir_all(root).expect("test directory should be removed");
+    }
     #[test]
     fn accepts_only_canonical_skill_draft_fields() {
         let canonical = serde_json::json!({

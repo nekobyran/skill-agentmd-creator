@@ -201,7 +201,7 @@ fn handle_request(request: HttpRequest, state: &ApiState) -> String {
             200,
             &HealthResponse {
                 ok: true,
-                service: "skill-agentmd-creator-api",
+                service: "skillcreator-api",
                 data_dir: state.data_dir.to_string_lossy().to_string(),
             },
         ),
@@ -376,6 +376,25 @@ mod tests {
         time::Duration,
     };
 
+    #[test]
+    fn health_uses_skillcreator_service_identity() {
+        let state = ApiState {
+            root: PathBuf::new(),
+            data_dir: PathBuf::new(),
+            skill_write_lock: Mutex::new(()),
+        };
+        let response = handle_request(
+            HttpRequest {
+                method: "GET".to_string(),
+                path: "/api/health".to_string(),
+                headers: HashMap::new(),
+                body: Vec::new(),
+            },
+            &state,
+        );
+        assert!(response.contains("skillcreator-api"));
+        assert!(!response.contains("skill-agentmd-creator-api"));
+    }
     #[test]
     fn skill_write_lock_serializes_mutations() {
         let state = Arc::new(ApiState {
