@@ -1,48 +1,66 @@
-# Skill Creator 入口索引
+# SkillCreator 入口索引
 
-## 应用入口
+## 工程入口
 
-- React 主界面：`frontend/src/App.tsx`
-- 全局视觉样式：`frontend/src/styles.css`
-- Tauri 命令入口：`src-tauri/src/main.rs`
-- 本地 HTTP 后台：`src-tauri/src/bin/skill_api_server.rs`
-- Skill 存储与 Codex 调用：`src-tauri/src/skill_store.rs`
+- Flutter Windows 客户端：`project/skillcreator-flutter/`
+- Flutter 应用入口：`project/skillcreator-flutter/lib/main.dart`
+- Flutter 状态与多文件 Skill 控制器：`project/skillcreator-flutter/lib/app_controller.dart`
+- Flutter 编辑器：`project/skillcreator-flutter/lib/pages/editor_page.dart`
+- Flutter 详细设计（bundle / 章节 / 固定编号规则 / 源码）：`project/skillcreator-flutter/lib/pages/advanced_studio_page.dart`
+- Flutter 规则图：`project/skillcreator-flutter/lib/pages/rule_graph_page.dart`
+- Flutter AI / 技能库 / 设置：`project/skillcreator-flutter/lib/pages/studio_pages.dart`
+- Flutter Skill/API 客户端：`project/skillcreator-flutter/lib/services/`
+- Windows 自绘标题栏与原生窗口壳：`project/skillcreator-flutter/windows/runner/`
+- Flutter Design 初始化回执：`project/skillcreator-flutter/.flutter-app-design-init.json`
+- 独立 Rust HTTP/JSON 后台：`project/skillcreator-rust-server/`
+- Rust API 入口：`project/skillcreator-rust-server/src/main.rs`
+- Skill bundle / Codex 调用 / 路径安全：`project/skillcreator-rust-server/src/skill_store.rs`
+- 外部模型无窗口 CLI：`command/Invoke-SkillCreator.ps1`
+- 本机 Codex Skill：`C:\Users\Administrator\.codex\skills\skillcreator-cli\`
 
-## 技能设计模块
+## Skill 规范与能力
 
-- 完整 Markdown、frontmatter、Contract、Workflow 领域模型：`frontend/src/features/skill-document/`
-- Flutter App Design 与 workflow-task 预设：`frontend/src/features/skill-document/presets/`
-- 详细设计逐属性编辑器：`frontend/src/features/skill-editor/`
-- AI 创建/修改聊天工作台：`frontend/src/features/ai-assistant/`
+- 根 `SKILL.md` 只负责 frontmatter、必须遵守的顶部规则和分区索引；详细规则进入独立 Markdown 分区。
+- 一次性工程规则放 `references/initialization.md`，常规执行不重复加载初始化分区。
+- Skill bundle 可包含安全 UTF-8 文本源码、模板和脚本，例如 `assets/*.dart`、`assets/*.rs`、`scripts/*.ps1`；Markdown 路由仍只指向 `.md`。
+- CLI 支持 `rule-check`、`rule-find`、`rule-add`、`rule-update`；CLI 创建的规则使用稳定 Rule ID 和固定分区编号。
+- 新增规则默认执行全 bundle 查重、低价值/小概率规则审查和默认行为冗余审查；修改规则默认检查弱化/回退风险。
+- AI 设计请求携带完整 `currentFiles`，响应使用 `files[] + deletedFiles[]`；stale 校验基于整个 bundle hash。
+- 多文件保存使用显式删除、提案覆盖、未提及文件保留的事务语义。
 
 ## 构建与运行
 
-- 统一入口：`command/run.ps1`
-- Skill 文档领域测试：`command/test-skill-document.ps1`
-- Windows release / GitHub Release：`command/Publish-SkillCreator.ps1`
-- Node 与 Rust SDK：`D:\vibecoding\sdk\nodejs`、`D:\vibecoding\sdk\rust`
-- 前端产物：`dist/`
-- Rust 临时构建目录：`src-tauri/target/`（验证完成后清理）
+- 统一 Windows 入口：`command/run.ps1`
+- Debug：`command/run.ps1 -BuildOnly -Configuration Debug`
+- Release：`command/run.ps1 -BuildOnly -Configuration Release`
+- Flutter/Rust 构建缓存、Pub cache、runtime-home、TEMP：优先 `H:\vibecoding\sdk\`
+- Flutter SDK / Rust toolchain / MSVC：`D:\vibecoding\sdk\`
+- Windows SDK 构建镜像：`H:\vibecoding\sdk\windows-sdk-10.0.26100.0`
+- Debug CLI backend：`release/skillcreator-rust-server/windows/debug/skill_api_server.exe`
+- Release CLI backend：`release/skillcreator-rust-server/windows/release/skill_api_server.exe`
+- CLI 回归：`command/test-skillcreator-cli.ps1`
 
 ## 发布入口
 
-- 线上静态发布页：`https://skillcreator.nkbr.cc`
-- 静态站源码：`site/`
+- Windows portable 发布脚本：`command/Publish-SkillCreator.ps1`
+- Windows portable 产物：`release/skillcreator-flutter/windows/release/`
+- GitHub Windows prerelease CI：`.github/workflows/private-release.yml`
+- 静态发布页工程：`project/skillcreator-site-static/`
+- Cloudflare Worker / Wrangler：`project/skillcreator-site-static/worker.js`、`project/skillcreator-site-static/wrangler.jsonc`
+- Worker 测试：`project/skillcreator-site-static/test/worker.test.mjs`
+- 静态发布页产物：`release/skillcreator-site-static/web/release/`
 - 站点构建器：`command/Build-SkillCreatorSite.mjs`
 - 站点验证器：`command/Verify-SkillCreatorSite.mjs`
-- Cloudflare 构建/预演/部署：`command/Deploy-SkillCreatorSite.ps1`
-- Cloudflare Static Assets 配置：`wrangler.skillcreator.jsonc`
+- Cloudflare 构建/部署：`command/Deploy-SkillCreatorSite.ps1`
 - 公开发布页 CI：`.github/workflows/pages.yml`
-- 公开 Windows prerelease CI：`.github/workflows/private-release.yml`
 - 版本说明：`RELEASE_NOTES.md`
-- 开源协议：`LICENSE`（Apache-2.0）与 `NOTICE`
-- 本地 Windows 发布资产：`release/skillcreator_windows/release/`（生成物，不入库）
-- 本地静态部署产物：`release/skillcreator_site_Web/release/`（生成物，不入库）
-- 视觉与协议证据：`verification/skillcreator-release-site/`
 
-新增或迁移上述入口、模块或产物目录时，同步更新本索引。
+## 已移除技术入口
 
-## 文件边界记录
+- `frontend/` React/Vite GUI 已删除。
+- `src-tauri/` Tauri runtime/backend 已删除。
+- 旧 `SkillAgentTool.sln`、`src/SkillAgentTool/` WinUI/.NET 原型和 `src/SkillAgentBridgeCpp/` C++ bridge 已删除。
+- 根 `package.json`、`package-lock.json`、`tsconfig.json`、`vite.config.ts` 已删除。
+- 桌面 GUI 唯一受支持实现为 Flutter；后台唯一受支持实现为独立 Rust server。不存在 Tauri、WinUI/C++ 兼容壳或旧 GUI fallback。
 
-- `frontend/src/App.tsx` 是接手前已超过 3,600 行的旧编辑器单体。本次新增的详细设计、AI 工作台和文档领域逻辑均已落到独立 feature；后续拆分点是把旧“顶部规则 / 本地规则 / 命令工具”面板迁出 App，避免在本次高风险存储改造中顺带重写既有编辑器。
-- `src-tauri/src/skill_store.rs` 的生产代码仍低于 2,000 行；文件总行数超过阈值来自同文件内的 Rust 单元测试。后续若测试继续增长，优先迁到独立测试模块。
+新增、迁移或删除上述关键入口、工程或发布目录时，同步更新本索引。

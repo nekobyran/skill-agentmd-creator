@@ -5,30 +5,46 @@ import { fileURLToPath } from 'node:url';
 
 const commandRoot = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(commandRoot, '..');
-const sourceRoot = path.join(projectRoot, 'site');
-const outputRoot = path.join(projectRoot, 'release', 'skillcreator_site_Web', 'release');
+const sourceRoot = path.join(projectRoot, 'project', 'skillcreator-site-static');
+const outputRoot = path.join(
+  projectRoot,
+  'release',
+  'skillcreator-site-static',
+  'web',
+  'release',
+);
 const stagingRoot = path.join(
   projectRoot,
   'release',
-  'skillcreator_site_Web',
+  'skillcreator-site-static',
+  'web',
   `.release-staging-${process.pid}`,
 );
+const nonStaticTopLevelEntries = new Set(['test', 'worker.js', 'wrangler.jsonc']);
 
 const readText = (filePath) => readFile(filePath, 'utf8');
 const readJson = async (filePath) => JSON.parse(await readText(filePath));
 const fileDetails = (filePath) => stat(filePath).catch(() => null);
 const shortRevision = (bytes) => createHash('sha256').update(bytes).digest('hex').slice(0, 12);
 
-const packageJson = await readJson(path.join(projectRoot, 'package.json'));
-const version = String(packageJson.version || '').trim();
+const pubspecText = await readText(path.join(projectRoot, 'project', 'skillcreator-flutter', 'pubspec.yaml'));
+const versionMatch = pubspecText.match(/^version:\s*([^\s+]+)(?:\+[^\s]+)?\s*$/mu);
+const version = String(versionMatch?.[1] || '').trim();
 if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.test(version)) {
   throw new Error(`Invalid SkillCreator version: ${version}`);
 }
 
 const tag = `v${version}`;
-const windowsReleaseRoot = path.join(projectRoot, 'release', 'skillcreator_windows', 'release');
+const windowsReleaseRoot = path.join(
+  projectRoot,
+  'release',
+  'skillcreator-flutter',
+  'windows',
+  'release',
+);
 const manifestPath = path.join(windowsReleaseRoot, `SkillCreator-${tag}-manifest.json`);
 const publishStatusPath = path.join(windowsReleaseRoot, `SkillCreator-${tag}-publish-status.json`);
+
 const fallbackMetadataPath = path.join(sourceRoot, 'release.json');
 const releaseNotesPath = path.join(projectRoot, 'RELEASE_NOTES.md');
 
@@ -40,23 +56,26 @@ if (manifestDetails?.isFile()) {
     throw new Error('Windows release manifest does not match the SkillCreator site version.');
   }
 
-  const files = Array.isArray(manifest.files) ? manifest.files : [];
-  const normalizeAsset = (kind, matcher) => {
-    const asset = files.find((entry) => matcher.test(String(entry.name || '')));
-    if (!asset) throw new Error(`Windows release manifest is missing the ${kind} asset.`);
-    if (!Number.isSafeInteger(asset.bytes) || asset.bytes <= 0) {
-      throw new Error(`${kind} asset has an invalid size.`);
-    }
-    if (!/^[a-f0-9]{64}$/u.test(String(asset.sha256 || ''))) {
-      throw new Error(`${kind} asset has an invalid SHA-256.`);
-    }
-    return {
-      kind,
-      name: String(asset.name),
-      sizeBytes: asset.bytes,
-      sha256: String(asset.sha256).toLowerCase(),
-    };
+    const portableArchive = manifest.portableArchive;
+  if (!portableArchive || typeof portableArchive !== 'object') {
+    throw new Error('Windows release manifest is missing portableArchive.');
+  }
+  if (!Number.isSafeInteger(portableArchive.bytes) || portableArchive.bytes <= 0) {
+    throw new Error('Portable archive has an invalid size.');
+  }
+  if (!/^[a-f0-9]{64}$/u.test(String(portableArchive.sha256 || ''))) {
+    throw new Error('Portable archive has an invalid SHA-256.');
+  }
+  const portableAsset = {
+    kind: 'portable',
+    name: String(portableArchive.name || ''),
+    sizeBytes: portableArchive.bytes,
+    sha256: String(portableArchive.sha256).toLowerCase(),
   };
+  if (!/-Portable\.zip$/iu.test(portableAsset.name)) {
+    throw new Error('Portable archive name does not match the Flutter ZIP contract.');
+  }
+
 
   const publishStatusDetails = await fileDetails(publishStatusPath);
   const publishStatus = publishStatusDetails?.isFile()
@@ -78,10 +97,8 @@ if (manifestDetails?.isFile()) {
     publishedAt: publishStatus?.publishedAt || manifest.generatedAtUtc || null,
     platform: 'Windows',
     architecture: 'x64',
-    assets: [
-      normalizeAsset('installer', /-Setup\.exe$/iu),
-      normalizeAsset('portable', /-Portable\.exe$/iu),
-    ],
+        assets: [portableAsset],
+
     checks: [
       { label: 'Windows x64 release', result: 'passed' },
       { label: 'SHA-256 manifest', result: 'passed' },
@@ -109,7 +126,15 @@ if (manifestDetails?.isFile()) {
 await rm(stagingRoot, { recursive: true, force: true });
 await mkdir(stagingRoot, { recursive: true });
 try {
-  await cp(sourceRoot, stagingRoot, { recursive: true });
+    await cp(sourceRoot, stagingRoot, {
+    recursive: true,
+    filter: (source) => {
+      const relative = path.relative(sourceRoot, source);
+      if (!relative) return true;
+      const [topLevel] = relative.split(path.sep);
+      return !nonStaticTopLevelEntries.has(topLevel);
+    },
+  });
 
   const [indexTemplate, stylesheetBytes, scriptBytes] = await Promise.all([
     readText(path.join(stagingRoot, 'index.html')),

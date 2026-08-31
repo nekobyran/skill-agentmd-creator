@@ -1,14 +1,16 @@
+import { createHash } from 'node:crypto';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const commandRoot = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(commandRoot, '..');
+const engineeringRoot = path.join(projectRoot, 'project', 'skillcreator-site-static');
 const requireRelease = process.argv.includes('--require-release');
 const explicitRoot = process.argv.find((argument) => argument.startsWith('--root='));
 const siteRoot = explicitRoot
   ? path.resolve(projectRoot, explicitRoot.slice('--root='.length))
-  : path.join(projectRoot, 'site');
+  : engineeringRoot;
 
 const requiredFiles = [
   'index.html',
@@ -22,6 +24,7 @@ const requiredFiles = [
   'release.json',
   'robots.txt',
   'sitemap.xml',
+  'assets/sponsor.jpg',
 ];
 
 const failures = [];
@@ -34,7 +37,7 @@ for (const relativePath of requiredFiles) {
 }
 
 if (failures.length === 0) {
-  const [html, notFound, css, script, headers, redirects, releaseText, manifestText] =
+  const [html, notFound, css, script, headers, redirects, releaseText, manifestText, sponsor, worker] =
     await Promise.all([
       readText('index.html'),
       readText('404.html'),
@@ -44,6 +47,8 @@ if (failures.length === 0) {
       readText('_redirects'),
       readText('release.json'),
       readText('manifest.webmanifest'),
+      readFile(path.join(siteRoot, 'assets/sponsor.jpg')),
+            readFile(path.join(engineeringRoot, 'worker.js'), 'utf8'),
     ]);
 
   let release;
@@ -61,6 +66,8 @@ if (failures.length === 0) {
     [html.includes('aria-live="polite"'), 'Live status region exists'],
     [html.includes('https://skillcreator.nkbr.cc/'), 'Canonical SkillCreator domain exists'],
     [html.includes('nekobyran/skill-agentmd-creator'), 'Public repository links exist'],
+    [html.includes('skill-agentmd-creator/blob/main/LICENSE'), 'Apache-2.0 license link exists'],
+    [html.includes('class="nkbr-support"') && html.includes('./assets/sponsor.jpg'), 'Unified sponsor section exists'],
     [html.includes('noscript'), 'No-script fallback exists'],
     [notFound.includes('规则路径'), 'Custom 404 page exists'],
     [css.includes('prefers-reduced-motion: reduce'), 'Reduced-motion CSS exists'],
@@ -69,7 +76,14 @@ if (failures.length === 0) {
     [script.includes('navigator.deviceMemory'), 'Memory-aware quality adaptation exists'],
     [script.includes('document.visibilityState'), 'Hidden-tab animation pause exists'],
     [script.includes('IntersectionObserver'), 'Viewport reveal uses IntersectionObserver'],
+    [script.includes("fetch('/api/release'"), 'Same-origin dynamic release API is used'],
+    [!script.includes("fetch('./release.json'"), 'Static release manifest is not used for downloads'],
+    [script.includes('revealAll') && script.includes('observer.disconnect'), 'Reveal timeout fallback exists'],
     [script.includes("getContext('2d'"), 'Adaptive Canvas rule field exists'],
+    [worker.includes('/api/release') && worker.includes('api.github.com/repos/'), 'Worker GitHub release API exists'],
+    [worker.includes('draft !== true') && worker.includes('no-public-release'), 'Worker release selection and fallback exist'],
+    [worker.includes('browser_download_url') && worker.includes('RELEASES_URL'), 'Worker validates release asset URLs'],
+    [createHash('sha256').update(sponsor).digest('hex') === '1e23933b0c5da7169ffbbc64ef58b324867ada4ea38cf1f772f2cf13ba5c300a', 'Sponsor image matches the NKBR root image'],
     [headers.includes('Content-Security-Policy'), 'Content Security Policy exists'],
     [headers.includes('Permissions-Policy'), 'Permissions Policy exists'],
     [redirects.includes('/index.html'), 'Canonical index redirect exists'],
@@ -91,9 +105,11 @@ if (failures.length === 0) {
     const assets = Array.isArray(release.assets) ? release.assets : [];
     checks.push(
       [release.status === 'verified' || release.status === 'published', 'Windows release is verified'],
-      [assets.length === 2, 'Installer and portable assets exist'],
+            [assets.length === 1 && assets[0]?.kind === 'portable', 'Flutter portable ZIP asset exists'],
       [assets.every((asset) => Number.isSafeInteger(asset.sizeBytes) && asset.sizeBytes > 0), 'Asset sizes are valid'],
       [assets.every((asset) => /^[a-f0-9]{64}$/u.test(asset.sha256 || '')), 'Asset SHA-256 values are valid'],
+      [assets.every((asset) => /-Portable\.zip$/iu.test(asset.name || '')), 'Portable asset uses ZIP packaging'],
+
     );
   }
 
@@ -110,8 +126,15 @@ if (failures.length === 0) {
     /[A-Z]:\\vibecoding\\/u,
   ];
 
-  const entries = await readdir(siteRoot, { recursive: true });
+    const entries = await readdir(siteRoot, { recursive: true });
   for (const relativePath of entries) {
+    if (
+      siteRoot.includes(`${path.sep}release${path.sep}`) &&
+      /^(?:worker\.js|wrangler\.jsonc|test(?:[\\/]|$))/u.test(relativePath)
+    ) {
+      failures.push(`Static release must not include engineering file: ${relativePath}`);
+      continue;
+    }
     if (/\.(?:exe|msi|zip|pdb|dll)$/iu.test(relativePath)) {
       failures.push(`Static site must not host release binary: ${relativePath}`);
       continue;
