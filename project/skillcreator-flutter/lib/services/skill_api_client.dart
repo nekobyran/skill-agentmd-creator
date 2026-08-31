@@ -13,9 +13,51 @@ class SkillApiException implements Exception {
 }
 
 class SkillApiClient {
-  SkillApiClient({this.host = '127.0.0.1', this.port = 1421});
+  SkillApiClient({
+    this.host = '127.0.0.1',
+    this.port = 1421,
+    String? expectedDataDir,
+  }) : expectedDataDir =
+           Directory(expectedDataDir ?? _defaultExpectedDataDir()).absolute.path;
   final String host;
   final int port;
+  final String expectedDataDir;
+
+  static String _defaultExpectedDataDir() {
+    final override = Platform.environment['SKILL_CREATOR_DATA_DIR']?.trim();
+    if (override != null && override.isNotEmpty) {
+      return Directory(override).absolute.path;
+    }
+    final appData = Platform.environment['APPDATA'];
+    if (appData != null && appData.trim().isNotEmpty) {
+      return Directory(
+        '$appData${Platform.pathSeparator}local.skillcreator',
+      ).absolute.path;
+    }
+    final dataHome = Platform.environment['XDG_DATA_HOME'];
+    if (dataHome != null && dataHome.trim().isNotEmpty) {
+      return Directory(
+        '$dataHome${Platform.pathSeparator}local.skillcreator',
+      ).absolute.path;
+    }
+    final home = Platform.environment['HOME'];
+    if (home != null && home.trim().isNotEmpty) {
+      return Directory(
+        '$home${Platform.pathSeparator}.local${Platform.pathSeparator}share${Platform.pathSeparator}local.skillcreator',
+      ).absolute.path;
+    }
+    return Directory(
+      '${Directory.current.path}${Platform.pathSeparator}.skillcreator',
+    ).absolute.path;
+  }
+
+  bool _sameDataDir(Object? value) {
+    if (value is! String || value.trim().isEmpty) return false;
+    final actual = Directory(value).absolute.path;
+    return Platform.isWindows
+        ? actual.toLowerCase() == expectedDataDir.toLowerCase()
+        : actual == expectedDataDir;
+  }
 
   Uri _uri(String path) =>
       Uri(scheme: 'http', host: host, port: port, path: '/api$path');
@@ -61,7 +103,10 @@ class SkillApiClient {
       '/health',
       timeout: const Duration(seconds: 3),
     );
-    return data is Map && data['ok'] == true;
+    return data is Map &&
+        data['ok'] == true &&
+        data['service'] == 'skillcreator-api' &&
+        _sameDataDir(data['dataDir']);
   }
 
   Future<void> ensureManifest() async => _request('POST', '/ensure_manifest');

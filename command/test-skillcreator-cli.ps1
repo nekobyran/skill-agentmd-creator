@@ -15,6 +15,18 @@ $port = ([Net.IPEndPoint]$listenerProbe.LocalEndpoint).Port
 $listenerProbe.Stop()
 $baseUrl = "http://127.0.0.1:$port/api"
 
+$expectedDataDir = if (-not [string]::IsNullOrWhiteSpace($env:SKILL_CREATOR_DATA_DIR)) {
+    [IO.Path]::GetFullPath($env:SKILL_CREATOR_DATA_DIR.Trim())
+} elseif (-not [string]::IsNullOrWhiteSpace($env:APPDATA)) {
+    [IO.Path]::GetFullPath((Join-Path $env:APPDATA 'local.skillcreator'))
+} elseif (-not [string]::IsNullOrWhiteSpace($env:XDG_DATA_HOME)) {
+    [IO.Path]::GetFullPath((Join-Path $env:XDG_DATA_HOME 'local.skillcreator'))
+} elseif (-not [string]::IsNullOrWhiteSpace($env:HOME)) {
+    [IO.Path]::GetFullPath((Join-Path $env:HOME '.local\share\local.skillcreator'))
+} else {
+    [IO.Path]::GetFullPath((Join-Path (Get-Location).Path '.skillcreator'))
+}
+
 $canonical = @'
 ---
 name: mock-skill
@@ -62,7 +74,7 @@ Confirm the recorded result.
 '@
 
 $job = Start-Job -ScriptBlock {
-    param($Port, $FixtureRoot, $Canonical, $Sample, $CanonicalRules)
+    param($Port, $FixtureRoot, $Canonical, $Sample, $CanonicalRules, $ExpectedDataDir)
 
     $listener = [Net.HttpListener]::new()
     $listener.Prefixes.Add("http://127.0.0.1:$Port/")
@@ -84,7 +96,7 @@ $job = Start-Job -ScriptBlock {
             $status = 200
             $payload = switch ("$($request.HttpMethod) $path") {
                 "GET /api/health" {
-                    @{ ok = $true; service = "mock-skillcreator"; dataDir = $FixtureRoot }
+                    @{ ok = $true; service = "skillcreator-api"; dataDir = $ExpectedDataDir }
                     break
                 }
                 "GET /api/shutdown" {
@@ -229,7 +241,7 @@ $job = Start-Job -ScriptBlock {
         $listener.Stop()
         $listener.Close()
     }
-} -ArgumentList $port, $fixtureRoot, $canonical, $sample, $canonicalRules
+} -ArgumentList $port, $fixtureRoot, $canonical, $sample, $canonicalRules, $expectedDataDir
 
 try {
     $ready = $false

@@ -708,13 +708,9 @@ class AppController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  File get _stateFile {
-    final appData =
-        Platform.environment['APPDATA'] ?? Directory.systemTemp.path;
-    return File(
-      '$appData${Platform.pathSeparator}local.skill.agentmd.creator${Platform.pathSeparator}flutter-ui-state.json',
-    );
-  }
+  File get _stateFile => File(
+    '${api.expectedDataDir}${Platform.pathSeparator}flutter-ui-state.json',
+  );
 
   @override
   void dispose() {

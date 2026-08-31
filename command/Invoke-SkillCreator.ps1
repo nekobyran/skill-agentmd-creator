@@ -64,10 +64,35 @@ function Invoke-Api {
     Invoke-RestMethod @parameters
 }
 
+function Get-ExpectedDataDir {
+    if (-not [string]::IsNullOrWhiteSpace($env:SKILL_CREATOR_DATA_DIR)) {
+        return [IO.Path]::GetFullPath($env:SKILL_CREATOR_DATA_DIR.Trim())
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:APPDATA)) {
+        return [IO.Path]::GetFullPath((Join-Path $env:APPDATA 'local.skillcreator'))
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:XDG_DATA_HOME)) {
+        return [IO.Path]::GetFullPath((Join-Path $env:XDG_DATA_HOME 'local.skillcreator'))
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:HOME)) {
+        return [IO.Path]::GetFullPath((Join-Path $env:HOME '.local\share\local.skillcreator'))
+    }
+    return [IO.Path]::GetFullPath((Join-Path (Get-Location).Path '.skillcreator'))
+}
+
 function Test-Api {
     try {
-        $null = Invoke-RestMethod -Method Get -Uri "$normalizedBaseUrl/health" -TimeoutSec 1
-        return $true
+        $health = Invoke-RestMethod -Method Get -Uri "$normalizedBaseUrl/health" -TimeoutSec 1
+        if ($health.ok -ne $true -or [string]$health.service -ne 'skillcreator-api') {
+            return $false
+        }
+        $actualDataDir = [IO.Path]::GetFullPath([string]$health.dataDir)
+        $expectedDataDir = Get-ExpectedDataDir
+        return [string]::Equals(
+            $actualDataDir,
+            $expectedDataDir,
+            [StringComparison]::OrdinalIgnoreCase
+        )
     } catch {
         return $false
     }

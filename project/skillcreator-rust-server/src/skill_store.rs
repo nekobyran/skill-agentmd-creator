@@ -10,6 +10,11 @@ use std::{
 
 pub const SKILL_FILE_NAME: &str = "SKILL.md";
 pub const ENTRY_FILE_NAME: &str = "skillcreator-entry.json";
+const APP_DATA_DIR_NAME: &str = "local.skillcreator";
+const LEGACY_APP_DATA_DIR_NAME: &str = "local.skill.agentmd.creator";
+const FALLBACK_DATA_DIR_NAME: &str = ".skillcreator";
+const LEGACY_FALLBACK_DATA_DIR_NAME: &str = ".skill-agentmd-creator";
+
 #[allow(dead_code)]
 pub const API_HOST: &str = "127.0.0.1";
 #[allow(dead_code)]
@@ -312,33 +317,81 @@ struct CodexAuthTokens {
     account_id: Option<String>,
 }
 
+fn absolute_data_path(path: &Path) -> Result<PathBuf, String> {
+    std::path::absolute(path).map_err(|error| error.to_string())
+}
+
+fn migrate_legacy_app_data_dir(
+    parent: &Path,
+    canonical_name: &str,
+    legacy_name: &str,
+) -> Result<PathBuf, String> {
+    let parent = absolute_data_path(parent)?;
+    let canonical = parent.join(canonical_name);
+    let legacy = parent.join(legacy_name);
+
+    if canonical.exists() && legacy.exists() {
+        return Err(format!(
+            "检测到新旧 SkillCreator 数据目录同时存在，拒绝自动合并：{}；{}",
+            canonical.to_string_lossy(),
+            legacy.to_string_lossy()
+        ));
+    }
+    if legacy.exists() {
+        if !legacy.is_dir() {
+            return Err(format!(
+                "旧 SkillCreator 数据路径不是目录：{}",
+                legacy.to_string_lossy()
+            ));
+        }
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        fs::rename(&legacy, &canonical).map_err(|error| {
+            format!(
+                "无法迁移 SkillCreator 数据目录 {} -> {}：{error}",
+                legacy.to_string_lossy(),
+                canonical.to_string_lossy()
+            )
+        })?;
+    }
+    Ok(canonical)
+}
+
 #[allow(dead_code)]
 pub fn default_app_data_dir() -> Result<PathBuf, String> {
     if let Ok(value) = std::env::var("SKILL_CREATOR_DATA_DIR") {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
-            return Ok(PathBuf::from(trimmed));
+            return absolute_data_path(Path::new(trimmed));
         }
     }
 
     if let Ok(app_data) = std::env::var("APPDATA") {
-        return Ok(PathBuf::from(app_data).join("local.skill.agentmd.creator"));
+        return migrate_legacy_app_data_dir(
+            Path::new(&app_data),
+            APP_DATA_DIR_NAME,
+            LEGACY_APP_DATA_DIR_NAME,
+        );
     }
 
     if let Ok(data_home) = std::env::var("XDG_DATA_HOME") {
-        return Ok(PathBuf::from(data_home).join("local.skill.agentmd.creator"));
+        return migrate_legacy_app_data_dir(
+            Path::new(&data_home),
+            APP_DATA_DIR_NAME,
+            LEGACY_APP_DATA_DIR_NAME,
+        );
     }
 
     if let Ok(home) = std::env::var("HOME") {
-        return Ok(PathBuf::from(home)
-            .join(".local")
-            .join("share")
-            .join("local.skill.agentmd.creator"));
+        let parent = PathBuf::from(home).join(".local").join("share");
+        return migrate_legacy_app_data_dir(&parent, APP_DATA_DIR_NAME, LEGACY_APP_DATA_DIR_NAME);
     }
 
-    std::env::current_dir()
-        .map(|path| path.join(".skill-agentmd-creator"))
-        .map_err(|error| error.to_string())
+    let current = std::env::current_dir().map_err(|error| error.to_string())?;
+    migrate_legacy_app_data_dir(
+        &current,
+        FALLBACK_DATA_DIR_NAME,
+        LEGACY_FALLBACK_DATA_DIR_NAME,
+    )
 }
 
 pub fn workspace_root_from_data_dir(data_dir: &Path) -> Result<PathBuf, String> {
@@ -2761,6 +2814,77 @@ mod tests {
             files: vec![],
             deleted_files: vec![],
         }
+    }
+
+    #[test]
+    fn normalizes_relative_data_paths_to_absolute() {
+        let path = absolute_data_path(Path::new("relative-root"))
+            .expect("relative data path should become absolute");
+        assert!(path.is_absolute());
+        assert!(path.ends_with("relative-root"));
+    }
+
+    #[test]
+    fn migrates_legacy_app_data_directory_without_merging() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after unix epoch")
+            .as_nanos();
+        let parent = std::env::temp_dir().join(format!(
+            "skillcreator-data-migration-{}-{nonce}",
+            std::process::id()
+        ));
+        let legacy = parent.join(LEGACY_APP_DATA_DIR_NAME);
+        fs::create_dir_all(legacy.join("skills")).expect("legacy skills directory should exist");
+        fs::create_dir_all(legacy.join("settings"))
+            .expect("legacy settings directory should exist");
+        fs::write(legacy.join("skills").join("marker.txt"), b"skill")
+            .expect("legacy skill marker should be written");
+        fs::write(legacy.join("settings").join("marker.txt"), b"setting")
+            .expect("legacy settings marker should be written");
+
+        let canonical =
+            migrate_legacy_app_data_dir(&parent, APP_DATA_DIR_NAME, LEGACY_APP_DATA_DIR_NAME)
+                .expect("legacy data directory should migrate");
+
+        assert_eq!(canonical, parent.join(APP_DATA_DIR_NAME));
+        assert!(!legacy.exists());
+        assert_eq!(
+            fs::read(canonical.join("skills").join("marker.txt"))
+                .expect("migrated skill marker should remain"),
+            b"skill"
+        );
+        assert_eq!(
+            fs::read(canonical.join("settings").join("marker.txt"))
+                .expect("migrated settings marker should remain"),
+            b"setting"
+        );
+        fs::remove_dir_all(parent).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn rejects_conflicting_app_data_directories() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after unix epoch")
+            .as_nanos();
+        let parent = std::env::temp_dir().join(format!(
+            "skillcreator-data-conflict-{}-{nonce}",
+            std::process::id()
+        ));
+        let canonical = parent.join(APP_DATA_DIR_NAME);
+        let legacy = parent.join(LEGACY_APP_DATA_DIR_NAME);
+        fs::create_dir_all(&canonical).expect("canonical directory should exist");
+        fs::create_dir_all(&legacy).expect("legacy directory should exist");
+
+        let error =
+            migrate_legacy_app_data_dir(&parent, APP_DATA_DIR_NAME, LEGACY_APP_DATA_DIR_NAME)
+                .expect_err("conflicting data roots should be rejected");
+
+        assert!(error.contains("同时存在"));
+        assert!(canonical.is_dir());
+        assert!(legacy.is_dir());
+        fs::remove_dir_all(parent).expect("test directory should be removed");
     }
 
     #[test]

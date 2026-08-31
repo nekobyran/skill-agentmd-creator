@@ -5,6 +5,61 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:skillcreator_flutter/services/skill_api_client.dart';
 
 void main() {
+  test('ping requires canonical service and data directory', () async {
+    final expected = await Directory.systemTemp.createTemp(
+      'skillcreator-health-',
+    );
+
+    Future<bool> ping(Map<String, Object?> payload) async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final handled = server.first.then((request) async {
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode(payload));
+        await request.response.close();
+      });
+      try {
+        final client = SkillApiClient(
+          port: server.port,
+          expectedDataDir: expected.path,
+        );
+        final result = await client.ping();
+        await handled;
+        return result;
+      } finally {
+        await server.close(force: true);
+      }
+    }
+
+    try {
+      expect(
+        await ping({
+          'ok': true,
+          'service': 'skillcreator-api',
+          'dataDir': expected.path,
+        }),
+        isTrue,
+      );
+      expect(
+        await ping({
+          'ok': true,
+          'service': 'skill-agentmd-creator-api',
+          'dataDir': expected.path,
+        }),
+        isFalse,
+      );
+      expect(
+        await ping({
+          'ok': true,
+          'service': 'skillcreator-api',
+          'dataDir': '${expected.path}-legacy',
+        }),
+        isFalse,
+      );
+    } finally {
+      await expected.delete(recursive: true);
+    }
+  });
+
   test('design request sends complete bundle and normative contract', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     Map<String, dynamic>? captured;
